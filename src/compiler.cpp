@@ -21,16 +21,16 @@ T ROUNDUP(T x, T y) {
 
 //This tile is a batch of Grid not computation tile
 class Tile {
-  typedef std::map<Dimension, size_t, Dimension::Comparer> DimensionToSizeMap;
+  typedef std::map<DimensionImpl, size_t, DimensionImpl::Comparer> DimensionToSizeMap;
   DimensionToSizeMap dimSizes_;
 
   public:  
   uint size(std::string dim) {
-    Dimension d = Dimension(dim, 0, 0);
+    DimensionImpl d = DimensionImpl(dim, 0, 0);
     return dimSizes_.at(d);
   }
 
-  Tile(std::vector<Dimension> dims, std::vector<uint> sizes) {
+  Tile(std::vector<DimensionImpl> dims, std::vector<uint> sizes) {
     assert(dims.size() == sizes.size());
     for (uint i = 0; i < dims.size(); i++) {
       dimSizes_[dims[i]] = sizes[i];
@@ -53,7 +53,7 @@ class Tile {
   }
 
   Tile eraseDim(std::string dim) {
-    Dimension d = Dimension(dim, 0, 0);
+    DimensionImpl d = DimensionImpl(dim, 0, 0);
     dimSizes_.erase(d);
   }
 
@@ -71,7 +71,7 @@ class FullGrid;
 class SplitGrid;
 class Grid {
 public:
-  typedef std::map<std::string, Dimension> NameToDimensionMap;
+  typedef std::map<std::string, DimensionImpl> NameToDimensionMap;
 
 protected:
   Grid(){}
@@ -94,7 +94,7 @@ public:
   Tile tile()               {return tile_;}
   NameToDimensionMap dims() {return dims_;}
   
-  FullGrid(std::vector<Dimension> dims, Tile tile) : 
+  FullGrid(std::vector<DimensionImpl> dims, Tile tile) : 
     tile_(tile) {
     for (auto iter : dims) {
       dims_.emplace(iter.name(), iter);
@@ -247,7 +247,7 @@ public:
 };
 
 Grid* FullGrid::split(std::string dimName, uint splitValue) {
-  std::vector<Dimension> dims1, dims2;
+  std::vector<DimensionImpl> dims1, dims2;
 
   for (auto iter : dims_) {
     if (iter.first == dimName) {
@@ -310,16 +310,16 @@ void search(FullGrid* fullGrid) {
 }
 
 int main(int argc, char* argv[]) {
-  std::shared_ptr<Dimension> x = std::make_shared<Dimension>(new Dimension("x", 0, 8));
-  std::shared_ptr<Dimension> k = std::make_shared<Dimension>(new Dimension("k", 0, 96));
-  std::shared_ptr<Dimension> y = std::make_shared<Dimension>(new Dimension("y", 0, 96));
+  std::shared_ptr<DimensionImpl> x = std::make_shared<DimensionImpl>(new DimensionImpl("x", 0, 8));
+  std::shared_ptr<DimensionImpl> k = std::make_shared<DimensionImpl>(new DimensionImpl("k", 0, 96));
+  std::shared_ptr<DimensionImpl> y = std::make_shared<DimensionImpl>(new DimensionImpl("y", 0, 96));
   
-  std::shared_ptr<ComputeTile> dstTile = std::make_shared<ComputeTile>(new ComputeTile({x, y}));
-  std::shared_ptr<ComputeTile> srcTile = std::make_shared<ComputeTile>(new ComputeTile({x, k}));
-  std::shared_ptr<ForAll> allSrcTiles = std::make_shared<ForAll>(new ForAll(k, srcTile, k->lower(), k->upper()));
+  std::shared_ptr<ComputeTileImpl> dstTile = std::make_shared<ComputeTileImpl>(new ComputeTileImpl({x, y}));
+  std::shared_ptr<ComputeTileImpl> srcTile = std::make_shared<ComputeTileImpl>(new ComputeTileImpl({x, k}));
+  std::shared_ptr<ForAllImpl> allSrcTiles = std::make_shared<ForAllImpl>(new ForAllImpl(k, srcTile, k->lower(), k->upper()));
 
   std::shared_ptr<Dependency> dep = std::make_shared<Dependency>(new Dependency(allSrcTiles, dstTile));
-  FullGrid fg(std::vector<Dimension>({*x, *k}), Tile({*x, *k}, {1,1}));
+  FullGrid fg(std::vector<DimensionImpl>({*x, *k}), Tile({*x, *k}, {1,1}));
   search(&fg);
   return 0;
 }
