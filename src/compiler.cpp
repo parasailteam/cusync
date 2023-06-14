@@ -5,6 +5,7 @@
 #include <cassert>
 #include <ostream>
 #include <algorithm>
+#include <memory>
 
 template<typename T> 
 T DIVUP(T x, T y) {
@@ -56,6 +57,7 @@ public:
   };
 };
 
+//This tile is a batch of Grid not computation tile
 class Tile {
   typedef std::map<Dimension, size_t, Dimension::Comparer> DimensionToSizeMap;
   DimensionToSizeMap dimSizes_;
@@ -344,10 +346,101 @@ void search(FullGrid* fullGrid) {
   //
 }
 
+class Expr {
+public:
+  Expr(){}
+  virtual ~Expr() {}
+
+  virtual std::shared_ptr<Expr> operator*(std::shared_ptr<Expr> op1);
+  virtual std::shared_ptr<Expr> operator+(std::shared_ptr<Expr> op1);
+};
+
+template<typename T>
+class Const : public Expr {
+  T val_;
+public:
+  T val() const {return val_;}
+  Const(T val) : val_(val) {}
+};
+
+using UIntConst = Const<uint>;
+
+class Var : public Expr {
+  std::string name_;
+public:
+  Var(std::string name) : name_(name) {}
+};
+
+class BinaryExpr : public Expr {
+public:
+  enum BinaryOp {
+    Add,
+    Sub,
+    Mul,
+    Div
+  };
+private:
+  BinaryOp op_;
+  std::shared_ptr<Expr> op1_;
+  std::shared_ptr<Expr> op2_;
+
+  BinaryExpr(std::shared_ptr<Expr> op1, BinaryOp op, std::shared_ptr<Expr> op2) : 
+    op1_(op1), op_(op), op2_(op2) {}
+};
+
+std::shared_ptr<Expr> Expr::operator*(std::shared_ptr<Expr> op1) {
+  return std::make_shared<BinaryExpr>(BinaryExpr::Mul, this, op1);
+}
+
+std::shared_ptr<Expr> Expr::operator+(std::shared_ptr<Expr> op1) {
+  return std::make_shared<BinaryExpr>(BinaryExpr::Add, this, op1);
+}
+
+class DimensionValue {
+  std::shared_ptr<Expr> dimVar_;
+  
+  DimensionValue(std::string name)
+  {
+    dimVar_ = std::make_shared<Var>(new Var(name));
+  }
+};
+
+class ForAll {
+  std::shared_ptr<Var> var_;
+  std::shared_ptr<Expr> baseExpr_;
+  int lower_;
+  int upper_;
+
+  ForAll(std::shared_ptr<Var> var, std::shared_ptr<Expr> baseExpr, int lower, int upper) : 
+    var_(var), baseExpr_(baseExpr), lower_(lower), upper_(upper)
+   {}
+};
+
+class ComputeTile {
+  std::vector<std::shared_ptr<Expr>> dims_;
+
+public:
+  ComputeTile(std::vector<std::string> dims) {
+    std::transform(dims.begin(), dims.end(), dims_.begin(), 
+                   [](std::string name){return std::make_shared<Var>(new Var(name));});
+  }
+};
+
+//Specify dependency by adding all src tiles for a dst tile
+class Dependency {
+  std::vector<std::shared_ptr<Expr>> srcTiles_;
+  std::shared_ptr<ComputeTile> dstTile_;
+
+  Dependency(std::vector<std::shared_ptr<Expr>> srcTiles, std::shared_ptr<ComputeTile> dstTile) : 
+    srcTiles_(srcTiles), dstTile_(dstTile) {}
+};
+
 int main(int argc, char* argv[]) {
   Dimension x = Dimension("x", 0, 8);
   Dimension y = Dimension("y", 0, 96);
   
+  ComputeTile dstTile({x, y});
+
   FullGrid fg(std::vector<Dimension>({x, y}), Tile({x, y}, {1,1}));
   search(&fg);
   return 0;
