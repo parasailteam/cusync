@@ -9,7 +9,9 @@ protected:
 public:
   std::shared_ptr<ExprImpl> impl() {return impl_;}
   BinaryExpr operator*(Expr op2);
+  BinaryExpr operator*(uint op2);
   BinaryExpr operator+(Expr op2);
+  BinaryExpr operator+(uint op2);
 
 protected:
   Expr(std::shared_ptr<ExprImpl> impl) : impl_(impl) {}
@@ -51,6 +53,18 @@ public:
 
 BinaryExpr Expr::operator*(Expr op2) {
   return BinaryExpr(*this, BinaryExpr::Mul, op2.impl());
+}
+
+BinaryExpr Expr::operator*(uint op2) {
+  return BinaryExpr(*this, BinaryExpr::Mul, UIntConst(op2));
+}
+
+BinaryExpr operator*(uint op1, Expr& op2) {
+  return BinaryExpr(op2, BinaryExpr::Mul, UIntConst(op1));
+}
+
+BinaryExpr Expr::operator+(uint op2) {
+  return BinaryExpr(*this, BinaryExpr::Mul, UIntConst(op2));
 }
 
 BinaryExpr Expr::operator+(Expr op2) {

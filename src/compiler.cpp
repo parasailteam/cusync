@@ -310,15 +310,34 @@ void search(FullGrid* fullGrid) {
 }
 
 int main(int argc, char* argv[]) {
-  std::shared_ptr<DimensionImpl> x = std::make_shared<DimensionImpl>(new DimensionImpl("x", 0, 8));
-  std::shared_ptr<DimensionImpl> k = std::make_shared<DimensionImpl>(new DimensionImpl("k", 0, 96));
-  std::shared_ptr<DimensionImpl> y = std::make_shared<DimensionImpl>(new DimensionImpl("y", 0, 96));
-  
-  std::shared_ptr<ComputeTileImpl> dstTile = std::make_shared<ComputeTileImpl>(new ComputeTileImpl({x, y}));
-  std::shared_ptr<ComputeTileImpl> srcTile = std::make_shared<ComputeTileImpl>(new ComputeTileImpl({x, k}));
-  std::shared_ptr<ForAllImpl> allSrcTiles = std::make_shared<ForAllImpl>(new ForAllImpl(k, srcTile, k->lower(), k->upper()));
+  Dimension x("x", 0, 8);
+  Dimension y("y", 0, 96);
+  Dimension k("k", 0, 96);
 
-  std::shared_ptr<Dependency> dep = std::make_shared<Dependency>(new Dependency(allSrcTiles, dstTile));
+  {
+    ComputeTile dstTile({x, y});
+    ComputeTile srcTile({x, k});
+    ForAll allSrcTiles (k, srcTile, 0, 96);
+    Dependency dep = Dependency(allSrcTiles, dstTile);
+  }
+
+  {
+    //Determine the upper bound and lower bound of srcTiles by adding y.upper. 
+    Dimension y("y", 0, 32);
+    ComputeTile dstTile({x, y});
+    ComputeTile srcTile1({x, y});
+    ComputeTile srcTile2({x, y + 32});
+    ComputeTile srcTile3({x, y + 2*32});
+  }
+
+  {
+    Dimension y("y", 0, 32);
+    ComputeTile dstTile({x, y});
+    ComputeTile srcTile1({x, 3*y});
+    ComputeTile srcTile2({x, 3*y + 1});
+    ComputeTile srcTile3({x, 3*y + 2});
+  }
+
   FullGrid fg(std::vector<DimensionImpl>({*x, *k}), Tile({*x, *k}, {1,1}));
   search(&fg);
   return 0;
