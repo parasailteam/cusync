@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <memory>
 
+#include "dependencyast.hpp"
+
 template<typename T> 
 T DIVUP(T x, T y) {
   return ((x + y - 1)/y);
@@ -16,46 +18,6 @@ template<typename T>
 T ROUNDUP(T x, T y) {
   return DIVUP(x, y) * y;
 }
-
-class Dimension {
-  std::string name_;
-  uint lower_;
-  uint upper_;
-  
-public:
-  std::string name() const {return name_;}
-  uint lower()       const {return lower_;}
-  uint upper()       const {return upper_;}
-
-  Dimension(std::string name, uint lower, uint upper) : 
-    name_(name), lower_(lower), upper_(upper) {
-      assert(upper > lower);
-    }
-
-  std::pair<Dimension, Dimension> split(uint splitVal) {
-    assert(splitVal > lower() && splitVal < upper());
-    return std::make_pair(Dimension(name(), lower(), splitVal), 
-                          Dimension(name(), splitVal, upper()));
-  }
-  
-  uint size() {return upper() - lower();}
-  
-  void print(std::ostream& os) {
-    os << "[" << name() << " = " << lower() << "->" << upper()  << "]";
-  }
-
-  struct Hash {
-    size_t operator()(const Dimension &d) const {
-      return std::hash<std::string>{}(d.name());
-    }
-  };
-
-  struct Comparer {
-    bool operator()(const Dimension& d, const Dimension& e) const {
-      return d.name() == e.name(); 
-    }
-  };
-};
 
 //This tile is a batch of Grid not computation tile
 class Tile {
@@ -113,6 +75,7 @@ public:
 
 protected:
   Grid(){}
+
 public:
   virtual NameToDimensionMap dims() = 0;
   virtual void batchGrid(std::vector<Grid*>& output, std::vector<uint> batchSizes) = 0;
@@ -346,102 +309,17 @@ void search(FullGrid* fullGrid) {
   //
 }
 
-class Expr {
-public:
-  Expr(){}
-  virtual ~Expr() {}
-
-  virtual std::shared_ptr<Expr> operator*(std::shared_ptr<Expr> op1);
-  virtual std::shared_ptr<Expr> operator+(std::shared_ptr<Expr> op1);
-};
-
-template<typename T>
-class Const : public Expr {
-  T val_;
-public:
-  T val() const {return val_;}
-  Const(T val) : val_(val) {}
-};
-
-using UIntConst = Const<uint>;
-
-class Var : public Expr {
-  std::string name_;
-public:
-  Var(std::string name) : name_(name) {}
-};
-
-class BinaryExpr : public Expr {
-public:
-  enum BinaryOp {
-    Add,
-    Sub,
-    Mul,
-    Div
-  };
-private:
-  BinaryOp op_;
-  std::shared_ptr<Expr> op1_;
-  std::shared_ptr<Expr> op2_;
-
-  BinaryExpr(std::shared_ptr<Expr> op1, BinaryOp op, std::shared_ptr<Expr> op2) : 
-    op1_(op1), op_(op), op2_(op2) {}
-};
-
-std::shared_ptr<Expr> Expr::operator*(std::shared_ptr<Expr> op1) {
-  return std::make_shared<BinaryExpr>(BinaryExpr::Mul, this, op1);
-}
-
-std::shared_ptr<Expr> Expr::operator+(std::shared_ptr<Expr> op1) {
-  return std::make_shared<BinaryExpr>(BinaryExpr::Add, this, op1);
-}
-
-class DimensionValue {
-  std::shared_ptr<Expr> dimVar_;
-  
-  DimensionValue(std::string name)
-  {
-    dimVar_ = std::make_shared<Var>(new Var(name));
-  }
-};
-
-class ForAll {
-  std::shared_ptr<Var> var_;
-  std::shared_ptr<Expr> baseExpr_;
-  int lower_;
-  int upper_;
-
-  ForAll(std::shared_ptr<Var> var, std::shared_ptr<Expr> baseExpr, int lower, int upper) : 
-    var_(var), baseExpr_(baseExpr), lower_(lower), upper_(upper)
-   {}
-};
-
-class ComputeTile {
-  std::vector<std::shared_ptr<Expr>> dims_;
-
-public:
-  ComputeTile(std::vector<std::string> dims) {
-    std::transform(dims.begin(), dims.end(), dims_.begin(), 
-                   [](std::string name){return std::make_shared<Var>(new Var(name));});
-  }
-};
-
-//Specify dependency by adding all src tiles for a dst tile
-class Dependency {
-  std::vector<std::shared_ptr<Expr>> srcTiles_;
-  std::shared_ptr<ComputeTile> dstTile_;
-
-  Dependency(std::vector<std::shared_ptr<Expr>> srcTiles, std::shared_ptr<ComputeTile> dstTile) : 
-    srcTiles_(srcTiles), dstTile_(dstTile) {}
-};
-
 int main(int argc, char* argv[]) {
-  Dimension x = Dimension("x", 0, 8);
-  Dimension y = Dimension("y", 0, 96);
+  std::shared_ptr<Dimension> x = std::make_shared<Dimension>(new Dimension("x", 0, 8));
+  std::shared_ptr<Dimension> k = std::make_shared<Dimension>(new Dimension("k", 0, 96));
+  std::shared_ptr<Dimension> y = std::make_shared<Dimension>(new Dimension("y", 0, 96));
   
-  ComputeTile dstTile({x, y});
+  std::shared_ptr<ComputeTile> dstTile = std::make_shared<ComputeTile>(new ComputeTile({x, y}));
+  std::shared_ptr<ComputeTile> srcTile = std::make_shared<ComputeTile>(new ComputeTile({x, k}));
+  std::shared_ptr<ForAll> allSrcTiles = std::make_shared<ForAll>(new ForAll(k, srcTile, k->lower(), k->upper()));
 
-  FullGrid fg(std::vector<Dimension>({x, y}), Tile({x, y}, {1,1}));
+  std::shared_ptr<Dependency> dep = std::make_shared<Dependency>(new Dependency(allSrcTiles, dstTile));
+  FullGrid fg(std::vector<Dimension>({*x, *k}), Tile({*x, *k}, {1,1}));
   search(&fg);
   return 0;
 }
