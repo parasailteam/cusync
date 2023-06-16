@@ -69,6 +69,7 @@ class Tile {
 
 class FullGrid;
 class SplitGrid;
+
 class Grid {
 public:
   typedef std::map<std::string, DimensionImpl> NameToDimensionMap;
@@ -322,7 +323,15 @@ int main(int argc, char* argv[]) {
   }
 
   {
-    //Determine the upper bound and lower bound of srcTiles by adding y.upper. 
+    //Determine the upper bound and lower bound of srcTiles by adding y.upper.
+    //Create dependency vectors between each pair of src tiles.
+    //Apply those vectors one by one and decrease the grid.
+    //src tiles {x,A1y+B1} and {x, A2y+B2} can be synchronized only if the set produce distinct values for each y, i.e., A1 and A2 are coprime
+    //To combine both tiles with B1=B2=0, if y%A1 == 0 then y/A1 and if y%A2 == 0 then y/A2 
+    //When A1=A2=1, if (y>=B1) then y-B1 else if y >= B2 then y - B2
+    //For arbitrary A1, A2, B1, B2, if ((y - B1) %A1 == 0) then return (y-B1)/A1; if ((y-B2)%A2 == 0) then return (y-B2)/A2
+    //When consecutive tiles are batched, then return ((y-B1)/A1)/T1 
+    
     Dimension y("y", 0, 32);
     ComputeTile dstTile({x, y});
     ComputeTile srcTile1({x, y});
