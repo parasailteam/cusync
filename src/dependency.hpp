@@ -6,13 +6,51 @@
 #include <cassert>
 #include <ostream>
 #include <algorithm>
+#include <stack>
 
 #pragma once 
+
+class ExprImpl;
+class VarImpl;
+class BinaryExprImpl;
+class ForAllImpl;
+class DimensionImpl;
+class UIntConstImpl;
+class ComputeTileImpl;
+class Visitor;
+
+enum BinaryOp {
+  Add,
+  Sub,
+  Mul,
+  Div
+};
+
+typedef std::map<std::string, DimensionImpl> NameToDimensionMap;
+
+
+class Visitor {
+public:
+  Visitor() {}
+  virtual void visit(ExprImpl& expr);
+  virtual void visit(BinaryExprImpl& expr) = 0;
+  virtual void visit(DimensionImpl& expr) = 0;
+  virtual void visit(UIntConstImpl& c) = 0;
+  virtual void visit(ForAllImpl& c) = 0;
+  virtual void visit(ComputeTileImpl& c) = 0;
+};
 
 class ExprImpl {
 public:
   ExprImpl(){}
   virtual ~ExprImpl() {}
+  virtual void visit(Visitor& visitor);
+  virtual bool isVar()        {return false;}
+  virtual bool isBinaryExpr() {return false;}
+  virtual bool isForAll()     {return false;}
+  virtual bool isDimension()  {return false;}
+  virtual bool isUIntConst()  {return false;} 
+  virtual bool isComputeTile() {return false;}
 };
 
 template<typename T>
@@ -23,20 +61,34 @@ public:
   ConstImpl(T val) : val_(val) {}
 };
 
+class UIntConstImpl : public ConstImpl<uint> {
+public:
+  UIntConstImpl(uint v) : ConstImpl<uint>(v) {}
+  virtual bool isUIntConst()  {return true;}
+  virtual void visit(Visitor& visitor) {visitor.visit(*this);}
+};
+
 class VarImpl : public ExprImpl {
   std::string name_;
 public:
   VarImpl(std::string name) : name_(name) {}
+  virtual bool isVar()        {return true;}
+  virtual void visit(Visitor& visitor) {visitor.visit(*this);}
 };
 
 class BinaryExprImpl : public ExprImpl {
-  BinaryExpr::BinaryOp op_;
+  BinaryOp op_;
   std::shared_ptr<ExprImpl> op1_;
   std::shared_ptr<ExprImpl> op2_;
 
 public:
-  BinaryExprImpl(std::shared_ptr<ExprImpl> op1, BinaryExpr::BinaryOp op, std::shared_ptr<ExprImpl> op2) : 
+  BinaryExprImpl(std::shared_ptr<ExprImpl> op1, BinaryOp op, std::shared_ptr<ExprImpl> op2) : 
     op1_(op1), op_(op), op2_(op2) {}
+  std::shared_ptr<ExprImpl> op1() {return op1_;}
+  std::shared_ptr<ExprImpl> op2() {return op2_;}
+  BinaryOp op() {return op_;}
+  virtual bool isBinaryExpr() {return true;}
+  virtual void visit(Visitor& visitor) {visitor.visit(*this);}
 };
 
 class ForAllImpl : public ExprImpl {
@@ -49,14 +101,18 @@ public:
   ForAllImpl(std::shared_ptr<DimensionImpl> var, std::shared_ptr<ExprImpl> baseExpr, uint lower, uint upper) : 
     var_(var), baseExpr_(baseExpr), lower_(lower), upper_(upper)
    {}
+  virtual bool isForAll()     {return true;}
+  virtual void visit(Visitor& visitor) {visitor.visit(*this);}
 };
 
 class ComputeTileImpl : public ExprImpl {
   std::vector<std::shared_ptr<ExprImpl>> dims_;
 
 public:
-  ComputeTileImpl(std::vector<std::shared_ptr<ExprImpl>> dims) : dims_(dims) {
-  }
+  ComputeTileImpl(std::vector<std::shared_ptr<ExprImpl>> dims) : dims_(dims) {}
+  std::vector<std::shared_ptr<ExprImpl>> dims() {return dims_;}
+  virtual bool isComputeTile() {return true;}
+  virtual void visit(Visitor& visitor) {visitor.visit(*this);}
 };
 
 class DimensionImpl : public ExprImpl {
@@ -81,7 +137,9 @@ public:
   }
   
   uint size() {return upper() - lower();}
-  
+  virtual bool isDimension() {return true;}
+  virtual void visit(Visitor& visitor) {visitor.visit(*this);}
+
   void print(std::ostream& os) {
     os << "[" << name() << " = " << lower() << "->" << upper()  << "]";
   }

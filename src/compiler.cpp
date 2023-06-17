@@ -7,7 +7,9 @@
 #include <algorithm>
 #include <memory>
 
+#include "dependency.hpp"
 #include "dependencyast.hpp"
+#include "dependencyvisitor.hpp"
 
 template<typename T> 
 T DIVUP(T x, T y) {
@@ -38,6 +40,9 @@ class Tile {
   }
 
   Tile(DimensionToSizeMap dimSizes) : dimSizes_(dimSizes) {}
+
+  Tile batch(uint batchSize) {
+  }
 
   Tile batch(std::string dim, uint batchSize) {
     DimensionToSizeMap newDimSizes;
@@ -71,16 +76,13 @@ class FullGrid;
 class SplitGrid;
 
 class Grid {
-public:
-  typedef std::map<std::string, DimensionImpl> NameToDimensionMap;
-
 protected:
   Grid(){}
 
 public:
   virtual NameToDimensionMap dims() = 0;
   virtual void batchGrid(std::vector<Grid*>& output, std::vector<uint> batchSizes) = 0;
-  virtual Grid* batchDim(std::string dim, uint batch) = 0;
+  virtual Grid* batchDim(uint batch) = 0;
   virtual Grid* collapseDim(std::string dim) = 0;
   virtual Grid* split(std::string dim, uint splitValue) = 0;
   virtual void print(std::ostream& os) = 0;
@@ -89,56 +91,99 @@ public:
 class FullGrid : public Grid {
 private:
   NameToDimensionMap dims_;
-  Tile tile_;
+  Dependency dep_;
+  uint batch_;
 
-public:
-  Tile tile()               {return tile_;}
-  NameToDimensionMap dims() {return dims_;}
+  FullGrid(NameToDimensionMap dims, Dependency dep, uint batch) : 
+    dims_(dims), dep_(dep), batch_(batch) {}
+  FullGrid(std::vector<DimensionImpl> dims, Dependency dep, uint batch) : 
+  dep_(dep), batch_(batch) {
+    for (auto iter : dims) {
+      dims_.emplace(iter.name(), iter);
+    }
+  }
   
-  FullGrid(std::vector<DimensionImpl> dims, Tile tile) : 
-    tile_(tile) {
+public:
+  NameToDimensionMap dims() {return dims_;}
+  Dependency dep()          {return dep_;}
+  FullGrid(std::vector<DimensionImpl> dims, Dependency dep) : 
+    dep_(dep), batch_(1) {
+    //Check that range of dims is same as range of dims in dep
+    // checkDimAndDepSizes(dims, dep);
     for (auto iter : dims) {
       dims_.emplace(iter.name(), iter);
     }
   }
 
-  FullGrid(NameToDimensionMap dims, Tile tile) : 
-    tile_(tile), dims_(dims) {}
-  
-  Grid* batchDim(std::string dimName, uint batch) {
-    return new FullGrid(dims_, tile_.batch(dimName, batch));
+  void checkDimAndDepSizes(std::vector<DimensionImpl> dims, Dependency dep) {
+    for (auto srcTile : dep.srcTiles()) {
+      for (uint dim = 0; dim < dims.size(); dim++) {
+        auto dstTile = dep.dstTile();
+        auto srcDim = std::dynamic_pointer_cast<DimensionImpl>(dstTile->dims()[dim])->name();
+        ComputeBoundsOfTile visitor(srcDim);
+        srcTile->visit(visitor);
+        uint maxValue = visitor.maxValue();
+        uint minValue = visitor.minValue();
+        assert(maxValue == dims[dim].upper());
+        assert(minValue == dims[dim].lower());
+      }
+    }
+  }
+
+  std::pair<uint, uint> getTileAccessCoeff(ComputeTileImpl& tile, uint idx) {
+    auto dimExpr = tile.dims()[idx];
+    ComputeExprValue visitor0(0);
+    dimExpr->visit(visitor0);
+    uint adder = visitor0.computedValue();
+
+    ComputeExprValue visitor1(1);
+    dimExpr->visit(visitor1);
+    uint v = visitor1.computedValue();
+    uint coeff = v - adder;
+
+    return std::make_pair(coeff, adder);
+  }
+
+  Grid* batchDim(uint batch) {
+    return new FullGrid(dims_, dep_, batch_*batch);
   }
 
   void batchGrid(std::vector<Grid*>& output, std::vector<uint> batchSizes) {
-    auto dimIter = dims_.begin();
-    std::vector<Grid*> newGrids;
-    while (dimIter != dims_.end()) {
-      if (newGrids.empty()) {
-        for (auto batch : batchSizes) {
-          newGrids.push_back(batchDim(dimIter->first, batch));
-        }
-      } else {
-        size_t numGrids = newGrids.size();
-        for (int i = 0; i < numGrids; i++) {
-          for (auto batch : batchSizes) {
-            newGrids.push_back(newGrids[i]->batchDim(dimIter->first, batch));
-          }
-        }
-      }
-      dimIter++;
+    // Batch tiles one by one
+    for (auto it : batchSizes) {
+      output.push_back(batchDim(it));
     }
+    
+    // Following code generates all cases by batching tiles along all dimensions
+    // auto dimIter = dims_.begin();
+    // std::vector<Grid*> newGrids;
+    // while (dimIter != dims_.end()) {
+    //   if (newGrids.empty()) {
+    //     for (auto batch : batchSizes) {
+    //       newGrids.push_back(batchDim(dimIter->first, batch));
+    //     }
+    //   } else {
+    //     size_t numGrids = newGrids.size();
+    //     for (int i = 0; i < numGrids; i++) {
+    //       for (auto batch : batchSizes) {
+    //         newGrids.push_back(newGrids[i]->batchDim(dimIter->first, batch));
+    //       }
+    //     }
+    //   }
+    //   dimIter++;
+    // }
 
-    for (auto newGrid : newGrids) {
-      output.push_back(newGrid);
-    }
+    // for (auto newGrid : newGrids) {
+    //   output.push_back(newGrid);
+    // }
   }
 
   Grid* collapseDim(std::string dimName) {
     NameToDimensionMap newDim = dims_;
     newDim.erase(dimName);
-    Tile tile = tile_.eraseDim(dimName);
+    // Tile tile = tile_.eraseDim(dimName);
 
-    return new FullGrid(newDim, tile);
+    return new FullGrid(newDim, dep_, batch_);
   }
 
   Grid* split(std::string dimName, uint splitValue);
@@ -149,8 +194,8 @@ public:
       iter.second.print(os);
       os << ",";
     }
-    os << " tile = ";
-    tile().print(os);
+    os << " batch = ";
+    os << batch_;
     os << "}";
   }
 };
@@ -162,11 +207,11 @@ public:
   SplitGrid(std::vector<FullGrid*> subGrids) : subGrids_(subGrids) {}
   NameToDimensionMap dims() {return subGrids_[0]->dims();}
   
-  Grid* batchDim(std::string dimName, uint batch) {
+  Grid* batchDim(uint batch) {
     std::vector<FullGrid*> batchedSubGrids;
 
     for (auto subGrid : subGrids_) {
-      batchedSubGrids.push_back(dynamic_cast<FullGrid*>(subGrid->batchDim(dimName, batch)));
+      batchedSubGrids.push_back(dynamic_cast<FullGrid*>(subGrid->batchDim(batch)));
     }
 
     return new SplitGrid(batchedSubGrids);
@@ -261,13 +306,22 @@ Grid* FullGrid::split(std::string dimName, uint splitValue) {
     }
   }
 
-  return new SplitGrid(std::vector<FullGrid*>({new FullGrid(dims1, tile()), new FullGrid(dims2, tile())}));
+  return new SplitGrid(std::vector<FullGrid*>({new FullGrid(dims1, dep_, batch_),
+                                               new FullGrid(dims2, dep_, batch_)}));
 }
 
 void search(FullGrid* fullGrid) {
   //Split a grid only twice
   //Assuming dependent matrix multiplications for now
-  std::vector<uint> tileBatches = {2, 4, 8, 16};
+  std::vector<uint> tileBatches;
+  if (fullGrid->dep().srcTiles().size() == 1 && fullGrid->dep().srcTiles()[0]->isForAll()) {
+    tileBatches = {2, 4, 8, 16};
+  } else {
+    for (uint i = 1; i < fullGrid->dep().srcTiles().size(); i++) {
+      tileBatches.push_back(i); 
+    }
+  }
+
   std::vector<uint> splitValues = {};
   uint tbsPerSM = 2;
   uint NumSMs = 80;
@@ -275,12 +329,17 @@ void search(FullGrid* fullGrid) {
 
   //Find possible split values
   auto dims = fullGrid->dims();
-  uint totalTBs = dims.at("x").size() * dims.at("y").size();
+  uint totalTBs = 1;
+  for (auto dim : dims) {
+    totalTBs *= dim.second.size();
+  }
+  
   //assume row major order and totalTbs > tbsPerWave
   uint waves = DIVUP(totalTBs, tbsPerWave);
 
   std::vector<std::tuple<uint, uint, uint>> lastTBInWave;
-  for (uint y = 0; y < dims.at("y").size(); y++) {
+  
+  for (uint y = 0; y < dims.at("k").size(); y++) {
     for (uint x = 0; x < dims.at("x").size(); x++) {
       uint tb = y * dims.at("x").size() + x;
       if ((tb+1)%tbsPerWave == 0) {
@@ -327,11 +386,17 @@ int main(int argc, char* argv[]) {
     //Create dependency vectors between each pair of src tiles.
     //Apply those vectors one by one and decrease the grid.
     //src tiles {x,A1y+B1} and {x, A2y+B2} can be synchronized only if the set produce distinct values for each y, i.e., A1 and A2 are coprime
+    
     //To combine both tiles with B1=B2=0, if y%A1 == 0 then y/A1 and if y%A2 == 0 then y/A2 
     //When A1=A2=1, if (y>=B1) then y-B1 else if y >= B2 then y - B2
-    //For arbitrary A1, A2, B1, B2, if ((y - B1) %A1 == 0) then return (y-B1)/A1; if ((y-B2)%A2 == 0) then return (y-B2)/A2
-    //When consecutive tiles are batched, then return ((y-B1)/A1)/T1 
+    //For arbitrary A1, A2, B1, B2, if (y >= B1 && (y - B1) %A1 == 0) then return (y-B1)/A1; if (y >= B2 && (y-B2)%A2 == 0) then return (y-B2)/A2
     
+    //Batched A1y+B1 tiles with each other
+    //return ((y-B1)/A1)/T1
+    //Or Batch A1y+B1 and A2y+B2 tiles with each other
+
+    //Split grid works just like it does normally
+
     Dimension y("y", 0, 32);
     ComputeTile dstTile({x, y});
     ComputeTile srcTile1({x, y});
@@ -345,9 +410,14 @@ int main(int argc, char* argv[]) {
     ComputeTile srcTile1({x, 3*y});
     ComputeTile srcTile2({x, 3*y + 1});
     ComputeTile srcTile3({x, 3*y + 2});
+
+    //Assuming that the src tiles are added in the order of how they are accessed
+    Dependency dep({srcTile1, srcTile2, srcTile3}, dstTile);
+    FullGrid fg(std::vector<DimensionImpl>({*x.impl(), *k.impl()}), dep);
+    search(&fg);
   }
 
-  FullGrid fg(std::vector<DimensionImpl>({*x, *k}), Tile({*x, *k}, {1,1}));
-  search(&fg);
+  // FullGrid fg(std::vector<DimensionImpl>({*x, *k}), Tile({*x, *k}, {1,1}));
+  // search(&fg);
   return 0;
 }
