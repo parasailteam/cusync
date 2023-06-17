@@ -109,6 +109,7 @@ public:
   FullGrid(std::vector<DimensionImpl> dims, Dependency dep) : 
     dep_(dep), batch_(1) {
     //Check that range of dims is same as range of dims in dep
+    // TODO:
     // checkDimAndDepSizes(dims, dep);
     for (auto iter : dims) {
       dims_.emplace(iter.name(), iter);
@@ -339,6 +340,7 @@ void search(FullGrid* fullGrid) {
 
   std::vector<std::tuple<uint, uint, uint>> lastTBInWave;
   
+  //TODO: Fix these dim of "k" and "x"
   for (uint y = 0; y < dims.at("k").size(); y++) {
     for (uint x = 0; x < dims.at("x").size(); x++) {
       uint tb = y * dims.at("x").size() + x;
@@ -379,6 +381,8 @@ int main(int argc, char* argv[]) {
     ComputeTile srcTile({x, k});
     ForAll allSrcTiles (k, srcTile, 0, 96);
     Dependency dep = Dependency(allSrcTiles, dstTile);
+    FullGrid fg(std::vector<DimensionImpl>({*x.impl(), *k.impl()}), dep);
+    search(&fg);
   }
 
   {
@@ -402,6 +406,10 @@ int main(int argc, char* argv[]) {
     ComputeTile srcTile1({x, y});
     ComputeTile srcTile2({x, y + 32});
     ComputeTile srcTile3({x, y + 2*32});
+
+    Dependency dep({srcTile1, srcTile2, srcTile3}, dstTile);
+    FullGrid fg(std::vector<DimensionImpl>({*x.impl(), *k.impl()}), dep);
+    search(&fg);
   }
 
   {
