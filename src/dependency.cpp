@@ -36,8 +36,10 @@ void ComputeTileImpl::genTileIndex(std::ostream& os, int indent, bool batched) {
       auto allDims = getAllDims.getAllDims();
       auto coeffAdder = getTileAccessCoeff(dim);
       assert(allDims.size() == 1);
+      bool addCond = true;
       if (coeffAdder.first == 1 and coeffAdder.second == 0) {
-        os << "true";
+        // os << "true";
+        addCond = false;
       } else {
         os << allDims[0]->name();
         if (coeffAdder.first != 1)
@@ -45,7 +47,7 @@ void ComputeTileImpl::genTileIndex(std::ostream& os, int indent, bool batched) {
         os << " <= " << coeffAdder.second;
       }
       iter++;
-      if (iter != dims_.end()) {
+      if (addCond && iter != dims_.end()) {
         os << " && ";
       }
     }
@@ -68,6 +70,20 @@ void ComputeTileImpl::genTileIndex(std::ostream& os, int indent, bool batched) {
     os << ")";
     if (batched && coeffAdder.first != 1) {
       os << "/" << coeffAdder.first;
+    }
+    if (iter != dims_.begin()) {
+      os << "*";
+      os << "(";
+      for (auto iter2 = dims_.begin(); iter2 != iter;) {
+        ComputeBounds getBounds;
+        getBounds.computeBounds(*(*iter2));
+        os << getBounds.size();
+        iter2++;
+        if (iter2 != iter) {
+          os << "*";
+        }
+      }
+      os << ")";
     }
     iter++;
     if (iter != dims_.end()) {

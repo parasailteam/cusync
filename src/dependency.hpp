@@ -140,7 +140,7 @@ public:
   uint size() {return upper() - lower();}
   virtual bool isDimension() {return true;}
   void genCondition(std::ostream& os) {
-    os << "(" << lower() << "<" << name() << " && " << name() << "<" << upper() << ")";
+    os << "(" << lower() << "<=" << name() << " && " << name() << "<" << upper() << ")";
   }
 
   virtual void visit(Visitor& visitor) {visitor.visit(*this);}

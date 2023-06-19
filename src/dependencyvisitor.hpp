@@ -90,6 +90,64 @@ public:
   virtual void visit(ForAllImpl& c) {}
 };
 
+class ComputeBounds : public Visitor {
+  std::stack<uint> valueStack;
+  bool minOrMax; //True for min and False for max
+  uint minValue_;
+  uint maxValue_;
+public:
+  ComputeBounds() : minOrMax(false), minValue_(0), maxValue_(0) {}
+  uint minValue() {return minValue_;}
+  uint maxValue() {return maxValue_;}
+  uint size() { return maxValue_ - minValue_;}
+  
+  void computeBounds(ExprImpl& expr) {
+    minOrMax = true;
+    expr.visit(*this);
+    minValue_ = valueStack.top();
+    valueStack.pop();
+    minOrMax = false;
+    expr.visit(*this);
+    maxValue_ = valueStack.top();
+    valueStack.pop();
+  }
+
+  virtual void visit(BinaryExprImpl& expr) {
+    expr.op1()->visit(*this);
+    uint first = valueStack.top();
+    valueStack.pop();
+    expr.op2()->visit(*this);
+    uint second = valueStack.top();
+    valueStack.pop();
+
+    if (expr.op() == BinaryOp::Add) {
+      valueStack.push(first + second);
+    } else if (expr.op() == BinaryOp::Mul) {
+      valueStack.push(first * second);
+    } else {assert(false);}
+  }
+
+  virtual void visit(DimensionImpl& expr) {
+    if (minOrMax) {
+      //minimum
+      valueStack.push(expr.lower());
+    } else {
+      //maximum
+      valueStack.push(expr.upper());
+    }
+  }
+
+  virtual void visit(UIntConstImpl& c) {
+    valueStack.push(c.val()); 
+  }
+
+  virtual void visit(ForAllImpl& c) {
+    assert(false);
+  }
+
+  virtual void visit(ComputeTileImpl& c) {}
+};
+
 class ComputeBoundsOfTile : public Visitor {
   std::stack<uint> valueStack;
   std::string dimName_;
@@ -104,10 +162,11 @@ public:
 
   virtual void visit(BinaryExprImpl& expr) {
     expr.op1()->visit(*this);
-    expr.op2()->visit(*this);
 
     uint first = valueStack.top();
     valueStack.pop();
+
+    expr.op2()->visit(*this);
     uint second = valueStack.top();
     valueStack.pop();
 
