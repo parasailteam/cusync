@@ -70,6 +70,26 @@ public:
   virtual void visit(ForAllImpl& c) {}
 };
 
+class AllDimsInExpr : public Visitor {
+  std::vector<DimensionImpl*> dims_;
+
+public:
+  AllDimsInExpr() {}
+  std::vector<DimensionImpl*> getAllDims() {return dims_;}
+  virtual void visit(BinaryExprImpl& expr) {
+    expr.op1()->visit(*this);
+    expr.op2()->visit(*this);
+  }
+  virtual void visit(DimensionImpl& expr) {
+    if (std::find(dims_.begin(), dims_.end(), &expr) == dims_.end()) {
+      dims_.push_back(&expr);
+    }
+  }
+  virtual void visit(UIntConstImpl& c) {}
+  virtual void visit(ComputeTileImpl& c) {}
+  virtual void visit(ForAllImpl& c) {}
+};
+
 class ComputeBoundsOfTile : public Visitor {
   std::stack<uint> valueStack;
   std::string dimName_;

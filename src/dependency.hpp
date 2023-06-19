@@ -113,6 +113,7 @@ public:
   std::vector<std::shared_ptr<ExprImpl>> dims() {return dims_;}
   virtual bool isComputeTile() {return true;}
   virtual void visit(Visitor& visitor) {visitor.visit(*this);}
+  void genTileIndex(std::ostream& os, int indent, bool batched);
 };
 
 class DimensionImpl : public ExprImpl {
@@ -138,6 +139,10 @@ public:
   
   uint size() {return upper() - lower();}
   virtual bool isDimension() {return true;}
+  void genCondition(std::ostream& os) {
+    os << "(" << lower() << "<" << name() << " && " << name() << "<" << upper() << ")";
+  }
+
   virtual void visit(Visitor& visitor) {visitor.visit(*this);}
 
   void print(std::ostream& os) {
@@ -156,3 +161,5 @@ public:
     }
   };
 };
+
+std::pair<uint, uint> getTileAccessCoeff(std::shared_ptr<ExprImpl> dimExpr);

@@ -6,10 +6,12 @@
 #include <ostream>
 #include <algorithm>
 #include <memory>
+#include <sstream>
 
 #include "dependency.hpp"
 #include "dependencyast.hpp"
 #include "dependencyvisitor.hpp"
+#include "utils.h"
 
 template<typename T> 
 T DIVUP(T x, T y) {
@@ -85,6 +87,7 @@ public:
   virtual Grid* batchDim(uint batch) = 0;
   virtual Grid* collapseDim(std::string dim) = 0;
   virtual Grid* split(std::string dim, uint splitValue) = 0;
+  virtual void codegen(std::ostream& os, int indent) = 0;
   virtual void print(std::ostream& os) = 0;
 };
 
@@ -131,20 +134,6 @@ public:
     }
   }
 
-  std::pair<uint, uint> getTileAccessCoeff(ComputeTileImpl& tile, uint idx) {
-    auto dimExpr = tile.dims()[idx];
-    ComputeExprValue visitor0(0);
-    dimExpr->visit(visitor0);
-    uint adder = visitor0.computedValue();
-
-    ComputeExprValue visitor1(1);
-    dimExpr->visit(visitor1);
-    uint v = visitor1.computedValue();
-    uint coeff = v - adder;
-
-    return std::make_pair(coeff, adder);
-  }
-
   Grid* batchDim(uint batch) {
     return new FullGrid(dims_, dep_, batch_*batch);
   }
@@ -188,6 +177,32 @@ public:
   }
 
   Grid* split(std::string dimName, uint splitValue);
+
+  void codegen(std::ostream& os, int indent) {
+    os << indentStr(indent) << "if (";
+    for (auto iter = dims_.begin(); iter != dims_.end();) {
+      iter->second.genCondition(os);
+      iter++;
+      if (iter != dims_.end()) {
+        os << " && ";
+      }
+    }
+    os << ") {" << std::endl;
+    //Consider src tiles {x,A1y+B1} and {x, A2y+B2}
+    //If the tiles are batched then both tiles should share the same semaphore, i.e.,
+    //if (y >= B1 && (y - B1) %A1 == 0) then return (y-B1)/A1; if (y >= B2 && (y-B2)%A2 == 0) then return (y-B2)/A2;
+    //Otherwise if they are not batched then just return y;
+    //TODO: Use __builtin_assume in Clang or __builtin_unreachable in gcc
+    for (uint i = 0; i < dep_.srcTiles().size(); i++) {
+      auto t = dep_.srcTiles()[i];
+      if (t->isComputeTile()) {
+        std::dynamic_pointer_cast<ComputeTileImpl>(t)->genTileIndex(os, indent+1, batch_ > 1 && batch_ > i);
+      }
+      os << std::endl;
+      if (batch_ == 1) break;
+    }
+    os << indentStr(indent) << "}";
+  }
 
   void print(std::ostream& os) {
     os << "{";
@@ -283,13 +298,20 @@ public:
     }
   }
 
+  void codegen(std::ostream& os, int indent) {
+    for (auto sg : subGrids_) {
+      sg->codegen(os, indent+1);
+      os << std::endl;
+    }
+  }
+
   void print(std::ostream& os) {
-    os << "split<";
+    os << "split{";
     for (auto subGrid : subGrids_) {
       subGrid->print(os);
       os << "; ";
     }
-    os << ">";
+    os << "}";
   }
 };
 
@@ -318,7 +340,7 @@ void search(FullGrid* fullGrid) {
   if (fullGrid->dep().srcTiles().size() == 1 && fullGrid->dep().srcTiles()[0]->isForAll()) {
     tileBatches = {2, 4, 8, 16};
   } else {
-    for (uint i = 1; i < fullGrid->dep().srcTiles().size(); i++) {
+    for (uint i = 2; i <= fullGrid->dep().srcTiles().size(); i++) {
       tileBatches.push_back(i); 
     }
   }
@@ -355,7 +377,6 @@ void search(FullGrid* fullGrid) {
   
   fullGrid->batchGrid(allGridCases, tileBatches);
 
-  std::vector<SplitGrid*> allSplitGrids;
   for (auto lastTB : lastTBInWave) {
     Grid* sg = fullGrid->split("x", std::get<0>(lastTB));
     sg = sg->split("y", std::get<1>(lastTB));
@@ -367,16 +388,27 @@ void search(FullGrid* fullGrid) {
   //split values are these lastTBInWave index, so split the grid among these dimensions
   
   //Combine grids that are contiguous with same tile batch in all dimensions
-
-  //
-}
+  int c = 0;
+  for (auto g : allGridCases) {
+    if (std::string(typeid(*g).name()).find("SplitGrid") == -1)
+      continue;
+    c++;
+    if (c > 10) break;
+    std::stringstream ss;
+    g->codegen(ss, 0);
+    std::cout << "=====" << std::endl;
+    g->print(std::cout);
+    std::cout << std::endl;
+    std::cout << ss.str() << std::endl;
+  }
+  }
 
 int main(int argc, char* argv[]) {
   Dimension x("x", 0, 8);
   Dimension y("y", 0, 96);
   Dimension k("k", 0, 96);
 
-  {
+  if (false) {
     ComputeTile dstTile({x, y});
     ComputeTile srcTile({x, k});
     ForAll allSrcTiles (k, srcTile, 0, 96);
@@ -385,15 +417,11 @@ int main(int argc, char* argv[]) {
     search(&fg);
   }
 
-  {
+  if (false) {
     //Determine the upper bound and lower bound of srcTiles by adding y.upper.
     //Create dependency vectors between each pair of src tiles.
     //Apply those vectors one by one and decrease the grid.
-    //src tiles {x,A1y+B1} and {x, A2y+B2} can be synchronized only if the set produce distinct values for each y, i.e., A1 and A2 are coprime
-    
-    //To combine both tiles with B1=B2=0, if y%A1 == 0 then y/A1 and if y%A2 == 0 then y/A2 
-    //When A1=A2=1, if (y>=B1) then y-B1 else if y >= B2 then y - B2
-    //For arbitrary A1, A2, B1, B2, if (y >= B1 && (y - B1) %A1 == 0) then return (y-B1)/A1; if (y >= B2 && (y-B2)%A2 == 0) then return (y-B2)/A2
+    //Consider src tiles {x,A1y+B1} and {x, A2y+B2} can be synchronized only if the set produce distinct values for each y, i.e., A1 and A2 are coprime
     
     //Batched A1y+B1 tiles with each other
     //return ((y-B1)/A1)/T1
@@ -423,6 +451,8 @@ int main(int argc, char* argv[]) {
     Dependency dep({srcTile1, srcTile2, srcTile3}, dstTile);
     FullGrid fg(std::vector<DimensionImpl>({*x.impl(), *k.impl()}), dep);
     search(&fg);
+
+    return 0;
   }
 
   // FullGrid fg(std::vector<DimensionImpl>({*x, *k}), Tile({*x, *k}, {1,1}));
