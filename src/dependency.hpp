@@ -102,6 +102,7 @@ public:
     var_(var), baseExpr_(baseExpr), lower_(lower), upper_(upper)
    {}
   virtual bool isForAll()     {return true;}
+  std::shared_ptr<ExprImpl> baseExpr() {return baseExpr_;}
   virtual void visit(Visitor& visitor) {visitor.visit(*this);}
 };
 
@@ -114,6 +115,21 @@ public:
   virtual bool isComputeTile() {return true;}
   virtual void visit(Visitor& visitor) {visitor.visit(*this);}
   void genTileIndex(std::ostream& os, int indent, bool batched);
+  std::shared_ptr<ComputeTileImpl> newTile(int dim, uint dimCoeff, uint dimAdder) {
+    std::vector<std::shared_ptr<ExprImpl>> newDims;
+    for (uint i = 0; i < dims_.size(); i++) {
+      if (i == dim) {
+        auto coeffConst = std::shared_ptr<UIntConstImpl>(new UIntConstImpl(dimCoeff));
+        auto adderConst = std::shared_ptr<UIntConstImpl>(new UIntConstImpl(dimAdder));
+        auto newDim = std::shared_ptr<ExprImpl>(new BinaryExprImpl(coeffConst, BinaryOp::Mul, dims_[i]));
+        newDim = std::shared_ptr<ExprImpl>(new BinaryExprImpl(newDim, BinaryOp::Add, adderConst));
+        newDims.push_back(newDim);
+      } else {
+        newDims.push_back(dims_[i]);
+      }
+    }
+    return std::shared_ptr<ComputeTileImpl>(new ComputeTileImpl(newDims));
+  }
 };
 
 class DimensionImpl : public ExprImpl {

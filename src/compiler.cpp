@@ -197,8 +197,31 @@ public:
       auto t = dep_.srcTiles()[i];
       if (t->isComputeTile()) {
         std::dynamic_pointer_cast<ComputeTileImpl>(t)->genTileIndex(os, indent+1, batch_ > 1 && batch_ > i);
+        os << std::endl;
+      } else if (t->isForAll()) {
+        auto fa = std::dynamic_pointer_cast<ForAllImpl>(t);
+        auto c = std::dynamic_pointer_cast<ComputeTileImpl>(fa->baseExpr());
+        //Create two new tiles:
+        //{x, y} => {x, batch * y + 0}, {x, batch*y + 1}, {x + batch*y + 2}, ...
+        //then generate code for each of them
+        if (batch_ > 1) {
+          std::vector<std::shared_ptr<ComputeTileImpl>> newTiles;
+          for (uint b = 0; b < batch_; b++) {
+            std::shared_ptr<ComputeTileImpl> newTile = c->newTile(1, batch_, b); //TODO: hardcoding dim 1 
+            newTiles.push_back(newTile);
+          }
+          for (auto newTile : newTiles) {
+            newTile->genTileIndex(os, indent+1, true);
+            os << std::endl;
+          }
+        } else {
+          c->genTileIndex(os, indent+1, batch_ > 1 && batch_ > i);
+          os << std::endl;
+        }
+      } else {
+        std::cout << "Invalid " << typeid(*t.get()).name() << std::endl;
+        assert(false);
       }
-      os << std::endl;
       if (batch_ == 1) break;
     }
     os << indentStr(indent) << "}";
@@ -272,15 +295,15 @@ public:
 
     auto gIter = allBatchedGrids.begin();
     while (gIter != allBatchedGrids.end()) {
+      allSubGridCasesNext.clear();
       if (gIter == allBatchedGrids.begin()) {
-        std::vector<FullGrid*> v = std::vector<FullGrid*>();
         for (auto g : gIter->second) {
-          v.push_back((FullGrid*)g);
+          std::vector<FullGrid*> v = {(FullGrid*)g};
+          allSubGridCasesNext.push_back(v);
         }
-        allSubGridCasesNext.push_back(v);
       } else {
-        for (auto g : gIter->second) {
-          for (auto gridVec : allSubGridCasesPrev) {
+        for (auto gridVec : allSubGridCasesPrev) {
+          for (auto g : gIter->second) {
             std::vector<FullGrid*> newVec = gridVec;
             // std::transform(gridVec.begin(), gridVec.end(), newVec.begin(), 
             //                [](FullGrid* fg){return (FullGrid*)fg;});
@@ -338,7 +361,7 @@ void search(FullGrid* fullGrid) {
   //Assuming dependent matrix multiplications for now
   std::vector<uint> tileBatches;
   if (fullGrid->dep().srcTiles().size() == 1 && fullGrid->dep().srcTiles()[0]->isForAll()) {
-    tileBatches = {2, 4, 8, 16};
+    tileBatches = {2};
   } else {
     for (uint i = 2; i <= fullGrid->dep().srcTiles().size(); i++) {
       tileBatches.push_back(i); 
@@ -378,8 +401,15 @@ void search(FullGrid* fullGrid) {
   fullGrid->batchGrid(allGridCases, tileBatches);
 
   for (auto lastTB : lastTBInWave) {
+    std::cout << "404: " << std::get<0>(lastTB) << " " << std::get<1>(lastTB) << std::endl;
     Grid* sg = fullGrid->split("x", std::get<0>(lastTB));
-    sg = sg->split("y", std::get<1>(lastTB));
+    std::cout << "after x ";
+    sg->print(std::cout);
+    std::cout << std::endl;
+    sg = sg->split("k", std::get<1>(lastTB));
+    std::cout << " after k ";
+    sg->print(std::cout);
+    std::cout << std::endl;
     allGridCases.push_back(sg);
     sg->batchGrid(allGridCases, tileBatches);
   }
@@ -408,7 +438,9 @@ int main(int argc, char* argv[]) {
   Dimension y("y", 0, 96);
   Dimension k("k", 0, 96);
 
-  if (false) {
+  //TODO: 
+  
+  if (true) {
     ComputeTile dstTile({x, y});
     ComputeTile srcTile({x, k});
     ForAll allSrcTiles (k, srcTile, 0, 96);
@@ -440,7 +472,7 @@ int main(int argc, char* argv[]) {
     search(&fg);
   }
 
-  {
+  if (false) {
     Dimension y("y", 0, 32);
     ComputeTile dstTile({x, y});
     ComputeTile srcTile1({x, 3*y});
