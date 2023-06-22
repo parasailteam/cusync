@@ -194,7 +194,15 @@ public:
   }
 
   virtual void visit(ForAllImpl& c) {
-    assert(false);
+    if (c.var()->name() == dimName_) {
+      if (minOrMax) {
+        //minimum
+        valueStack.push(c.lower());
+      } else {
+        //maximum
+        valueStack.push(c.upper());
+      }
+    }
   }
 
   virtual void visit(ComputeTileImpl& c) {

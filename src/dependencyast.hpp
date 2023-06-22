@@ -76,20 +76,45 @@ public:
   std::shared_ptr<ComputeTileImpl> impl() { return std::dynamic_pointer_cast<ComputeTileImpl>(impl_);}
 };
 
+class GridDim {
+  std::shared_ptr<DimensionImpl> x_;
+  std::shared_ptr<DimensionImpl> y_;
+  std::shared_ptr<DimensionImpl> z_;
+
+public:
+  GridDim(Dimension x, Dimension y) : x_(x.impl()), y_(y.impl()) {}
+  
+  std::shared_ptr<DimensionImpl> x() {return x_;}
+  std::shared_ptr<DimensionImpl> y() {return y_;}
+  std::shared_ptr<DimensionImpl> z() {return z_;}
+
+  uint numDims() {return 2;}
+  std::shared_ptr<DimensionImpl> dim(uint i) {
+    assert (i < 3);
+    if (i == 0) return x();
+    if (i == 1) return y();
+    return z();
+  }
+};
+
+
 //Specify dependency by adding all src tiles for a dst tile
 class Dependency {
   std::vector<std::shared_ptr<ExprImpl>> srcTiles_;
   std::shared_ptr<ComputeTileImpl> dstTile_;
-
+  GridDim grid1_; 
+  GridDim grid2_;
 public:
-  Dependency(std::vector<Expr> srcTiles, ComputeTile dstTile) : 
-    dstTile_(dstTile.impl()), srcTiles_(srcTiles.size()) {
+  Dependency(GridDim grid1, GridDim grid2, std::vector<Expr> srcTiles, ComputeTile dstTile) : 
+    dstTile_(dstTile.impl()), srcTiles_(srcTiles.size()), grid1_(grid1), grid2_(grid2) {
     std::transform(srcTiles.begin(), srcTiles.end(), srcTiles_.begin(), [](Expr& e){return e.impl();});
   }
 
-  Dependency(Expr srcTile, ComputeTile dstTile) : 
-    srcTiles_({srcTile.impl()}), dstTile_(dstTile.impl()) {}
+  Dependency(GridDim grid1, GridDim grid2, Expr srcTile, ComputeTile dstTile) : 
+    srcTiles_({srcTile.impl()}), dstTile_(dstTile.impl()), grid1_(grid1), grid2_(grid2) {}
   
   std::vector<std::shared_ptr<ExprImpl>> srcTiles() {return srcTiles_;}
   std::shared_ptr<ComputeTileImpl> dstTile() {return dstTile_;}
+  GridDim grid1() {return grid1_;}
+  GridDim grid2() {return grid2_;}
 };

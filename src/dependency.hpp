@@ -102,7 +102,10 @@ public:
     var_(var), baseExpr_(baseExpr), lower_(lower), upper_(upper)
    {}
   virtual bool isForAll()     {return true;}
+  std::shared_ptr<DimensionImpl> var() {return var_;}
   std::shared_ptr<ExprImpl> baseExpr() {return baseExpr_;}
+  uint lower() {return lower_;}
+  uint upper() {return upper_;}
   virtual void visit(Visitor& visitor) {visitor.visit(*this);}
 };
 

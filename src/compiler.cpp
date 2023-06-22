@@ -109,13 +109,16 @@ private:
 public:
   NameToDimensionMap dims() {return dims_;}
   Dependency dep()          {return dep_;}
-  FullGrid(std::vector<DimensionImpl> dims, Dependency dep) : 
+  FullGrid(Dependency dep) : 
     dep_(dep), batch_(1) {
-    //Check that range of dims is same as range of dims in dep
-    // TODO:
-    // checkDimAndDepSizes(dims, dep);
-    for (auto iter : dims) {
-      dims_.emplace(iter.name(), iter);
+    //Create the dimensions of this grid by expanding
+    //the source tiles
+    //TODO: Check for dimensions in some way?
+
+    auto dstTile = dep.dstTile();
+    for (uint dimIdx = 0; dimIdx < dep.grid1().numDims(); dimIdx++) {
+      auto dim = dep.grid1().dim(dimIdx);
+      dims_.emplace(dim->name(), *dim);
     }
   }
 
@@ -386,7 +389,7 @@ void search(FullGrid* fullGrid) {
   std::vector<std::tuple<uint, uint, uint>> lastTBInWave;
   
   //TODO: Fix these dim of "k" and "x"
-  for (uint y = 0; y < dims.at("k").size(); y++) {
+  for (uint y = 0; y < dims.at("y").size(); y++) {
     for (uint x = 0; x < dims.at("x").size(); x++) {
       uint tb = y * dims.at("x").size() + x;
       if ((tb+1)%tbsPerWave == 0) {
@@ -406,7 +409,7 @@ void search(FullGrid* fullGrid) {
     std::cout << "after x ";
     sg->print(std::cout);
     std::cout << std::endl;
-    sg = sg->split("k", std::get<1>(lastTB));
+    sg = sg->split("y", std::get<1>(lastTB));
     std::cout << " after k ";
     sg->print(std::cout);
     std::cout << std::endl;
@@ -431,24 +434,36 @@ void search(FullGrid* fullGrid) {
     std::cout << std::endl;
     std::cout << ss.str() << std::endl;
   }
-  }
+}
 
 int main(int argc, char* argv[]) {
   Dimension x("x", 0, 8);
-  Dimension y("y", 0, 96);
-  Dimension k("k", 0, 96);
-
+  Dimension y1("y", 0, 96);
+  Dimension y2("y", 0, 96);
+  GridDim grid1(x, y1);
+  GridDim grid2(x, y2);
   //TODO: 
-  
+  //1. Dimensions provided to FullGrid and dependency are different
+  // Only need to provide source tiles because we can assume destination tile is {x,y}
+  // Create grids using dimensions: {x, y1} and {x, y2} for ex
+  // 
+  //2. Generate tile.x, tile.y, etc.
+  //3. Use Grid1, Grid2 variables
+  //4. Provide extents to Grid?
+  //5. How to schedule tiles?
+  //   Need a way to specify thread blocks to a tile because multiple thread blocks 
+  //   can compute a tile.
+
   if (true) {
-    ComputeTile dstTile({x, y});
-    ComputeTile srcTile({x, k});
-    ForAll allSrcTiles (k, srcTile, 0, 96);
-    Dependency dep = Dependency(allSrcTiles, dstTile);
-    FullGrid fg(std::vector<DimensionImpl>({*x.impl(), *k.impl()}), dep);
+    ComputeTile dstTile({x, y2});
+    ComputeTile srcTile({x, y1});
+   
+    ForAll allSrcTiles (y1, srcTile, 0, 96);
+    Dependency dep = Dependency(grid1, grid2, allSrcTiles, dstTile);
+    FullGrid fg(dep);
     search(&fg);
   }
-
+  // return 0;
   if (false) {
     //Determine the upper bound and lower bound of srcTiles by adding y.upper.
     //Create dependency vectors between each pair of src tiles.
@@ -467,21 +482,22 @@ int main(int argc, char* argv[]) {
     ComputeTile srcTile2({x, y + 32});
     ComputeTile srcTile3({x, y + 2*32});
 
-    Dependency dep({srcTile1, srcTile2, srcTile3}, dstTile);
-    FullGrid fg(std::vector<DimensionImpl>({*x.impl(), *k.impl()}), dep);
-    search(&fg);
+    // Dependency dep({srcTile1, srcTile2, srcTile3}, dstTile);
+    // FullGrid fg(dep);
+    // search(&fg);
   }
 
-  if (false) {
-    Dimension y("y", 0, 32);
-    ComputeTile dstTile({x, y});
-    ComputeTile srcTile1({x, 3*y});
-    ComputeTile srcTile2({x, 3*y + 1});
-    ComputeTile srcTile3({x, 3*y + 2});
+  if (true) {
+    Dimension y2("y", 0, 32);
+    GridDim grid2(x, y2);
+    ComputeTile dstTile({x, y2});
+    ComputeTile srcTile1({x, 3*y2});
+    ComputeTile srcTile2({x, 3*y2 + 1});
+    ComputeTile srcTile3({x, 3*y2 + 2});
 
     //Assuming that the src tiles are added in the order of how they are accessed
-    Dependency dep({srcTile1, srcTile2, srcTile3}, dstTile);
-    FullGrid fg(std::vector<DimensionImpl>({*x.impl(), *k.impl()}), dep);
+    Dependency dep(grid1, grid2, {srcTile1, srcTile2, srcTile3}, dstTile);
+    FullGrid fg(dep);
     search(&fg);
 
     return 0;
