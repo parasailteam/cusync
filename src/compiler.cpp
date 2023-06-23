@@ -359,6 +359,30 @@ Grid* FullGrid::split(std::string dimName, uint splitValue) {
                                                new FullGrid(dims2, dep_, batch_)}));
 }
 
+void genSchedule(int indent, std::ostream& os, Dependency dep) {
+  const std::string yt = "yt";
+  const std::string linearId = "linearId";
+  os << indentStr(indent+1) << "uint " << yt << ";" << std::endl;
+  os << indentStr(indent+1);
+  for (uint i = 0; i < dep.srcTiles().size(); i++) {
+    auto t = dep.srcTiles()[i];
+    if (t->isComputeTile()) {
+      std::dynamic_pointer_cast<ComputeTileImpl>(t)
+        ->genSchedIndex(os, 0, i, yt);
+    } else {
+      assert(t->isForAll());
+      auto baseTile = std::dynamic_pointer_cast<ForAllImpl>(t)->baseExpr();
+      std::dynamic_pointer_cast<ComputeTileImpl>(baseTile)->genSchedIndex(os, 0, i, yt);
+    }
+    os << ";" << std::endl;
+    os << indentStr(indent+1) << "else ";
+  }
+
+  //FIX: TODO: the remaining case
+  os << yt << " = " << 0 << std::endl;
+  os << indentStr(indent+1) + "return " << linearId << "/" << dep.srcTiles().size() << "+"<< yt << ";" << std::endl; 
+}
+
 void search(FullGrid* fullGrid) {
   //Split a grid only twice
   //Assuming dependent matrix multiplications for now
@@ -434,25 +458,43 @@ void search(FullGrid* fullGrid) {
     std::cout << std::endl;
     std::cout << ss.str() << std::endl;
   }
+
+  //Schedule all source tiles for each dependent tile
+  //For src tiles {C1x+D1, A1y+B1}, {C2x + D2, A2y + B2}, ... {CNx + DN, ANy + BN}
+  //Generate code like this:
+  //uint t;
+  // if(x %C1 == D1) { if (y%A1 == B1) (y-B1)/A1  (x - D1)/C1;
+  //          else if (y%A2 == B2) (y-B2)/A2 + 1; ...
+  //          else if (y%AN == BN) (y-BN)/AN + N else (??)}
+  // 
+  //return linearId/N + t;
+  //Data reuse in L2 cache depends on how linearid is computed.
+
+  std::cout << "====== order =======" << std::endl;
+  genSchedule(0, std::cout, fullGrid->dep());
 }
 
 int main(int argc, char* argv[]) {
   Dimension x("x", 0, 8);
   Dimension y1("y", 0, 96);
   Dimension y2("y", 0, 96);
+
   GridDim grid1(x, y1);
   GridDim grid2(x, y2);
   //TODO: 
-  //1. Dimensions provided to FullGrid and dependency are different
-  // Only need to provide source tiles because we can assume destination tile is {x,y}
-  // Create grids using dimensions: {x, y1} and {x, y2} for ex
-  // 
-  //2. Generate tile.x, tile.y, etc.
-  //3. Use Grid1, Grid2 variables
-  //4. Provide extents to Grid?
+  //1. Dimensions provided to FullGrid and dependency are different [DONE]
+  //   Create grids using dimensions: {x, y1} and {x, y2} for ex
+  //2. Generate tile.x, tile.y, etc. [DONE]
+  //3. Use Grid1, Grid2 variables [DONE]
+  //4. Provide extents to Grid? 
   //5. How to schedule tiles?
-  //   Need a way to specify thread blocks to a tile because multiple thread blocks 
+  //   a. Need a way to specify thread blocks to a tile because multiple thread blocks 
   //   can compute a tile.
+  //   b. Assume that each threadblock {x, y} computes one tile {x, y} 
+  //   c. Schedule all src tiles first for each dst tile 
+  //6. Collapse dimension?
+  //7. Do dimension checks 
+
 
   if (true) {
     ComputeTile dstTile({x, y2});
@@ -462,6 +504,7 @@ int main(int argc, char* argv[]) {
     Dependency dep = Dependency(grid1, grid2, allSrcTiles, dstTile);
     FullGrid fg(dep);
     search(&fg);
+    return 0;
   }
   // return 0;
   if (false) {

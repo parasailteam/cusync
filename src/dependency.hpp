@@ -133,6 +133,8 @@ public:
     }
     return std::shared_ptr<ComputeTileImpl>(new ComputeTileImpl(newDims));
   }
+
+  void genSchedIndex(std::ostream& os, int indent, int tileIndex, std::string yt);
 };
 
 class DimensionImpl : public ExprImpl {
@@ -158,9 +160,7 @@ public:
   
   uint size() {return upper() - lower();}
   virtual bool isDimension() {return true;}
-  void genCondition(std::ostream& os) {
-    os << "(" << lower() << "<=" << name() << " && " << name() << "<" << upper() << ")";
-  }
+  void genCondition(std::ostream& os);
 
   virtual void visit(Visitor& visitor) {visitor.visit(*this);}
 

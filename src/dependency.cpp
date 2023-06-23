@@ -2,6 +2,8 @@
 #include "dependencyvisitor.hpp"
 #include "utils.h"
 
+const std::string TILE = "tile.";
+
 void ExprImpl::visit(Visitor& visitor) {visitor.visit(*this);}
 
 void Visitor::visit(ExprImpl& expr){assert(false); expr.visit(*this);};
@@ -41,7 +43,7 @@ void ComputeTileImpl::genTileIndex(std::ostream& os, int indent, bool batched) {
         // os << "true";
         addCond = false;
       } else {
-        os << allDims[0]->name();
+        os << TILE << allDims[0]->name();
         if (coeffAdder.first != 1)
           os << "%" << coeffAdder.first;
         os << " <= " << coeffAdder.second;
@@ -63,7 +65,7 @@ void ComputeTileImpl::genTileIndex(std::ostream& os, int indent, bool batched) {
     auto allDims = getAllDims.getAllDims();
     auto coeffAdder = getTileAccessCoeff(dim);
     assert(allDims.size() == 1);
-    os << "(" + allDims[0]->name();
+    os << "(" + TILE + allDims[0]->name();
     if (batched && coeffAdder.second != 0) {
       os << " - " << coeffAdder.second;
     }
@@ -94,6 +96,33 @@ void ComputeTileImpl::genTileIndex(std::ostream& os, int indent, bool batched) {
   os << ";";
 }
 
+void ComputeTileImpl::genSchedIndex(std::ostream& os, int indent, int tileIndex, std::string yt) {
+  os << indentStr(indent) << "if (";
+  for (auto iter = dims_.begin(); iter != dims_.end();) {
+    auto dim = *iter;
+    AllDimsInExpr getAllDims;
+    dim->visit(getAllDims);
+    auto allDims = getAllDims.getAllDims();
+    auto coeffAdder = getTileAccessCoeff(dim);
+    assert(allDims.size() == 1);
+    if (coeffAdder.first == 1 and coeffAdder.second == 0) {
+      os << "true";
+    } else {
+      os << TILE << allDims[0]->name();
+      if (coeffAdder.first != 1)
+        os << "%" << coeffAdder.first;
+      os << " <= " << coeffAdder.second;
+    }
+    iter++;
+    if (iter != dims_.end()) {
+      os << " && ";
+    }
+  }
+  os << ")";
+
+  os << indentStr(indent + 1) << "yt = " << tileIndex << ";";
+}
+
 std::pair<uint, uint> getTileAccessCoeff(std::shared_ptr<ExprImpl> dimExpr) {
   ComputeExprValue visitor0(0);
   dimExpr->visit(visitor0);
@@ -105,4 +134,8 @@ std::pair<uint, uint> getTileAccessCoeff(std::shared_ptr<ExprImpl> dimExpr) {
   uint coeff = v - adder;
 
   return std::make_pair(coeff, adder);
+}
+
+void DimensionImpl::genCondition(std::ostream& os) {
+  os << "(" << lower() << "<=" << TILE << name() << " && " << TILE << name() << "<" << upper() << ")";
 }
