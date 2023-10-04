@@ -20,6 +20,8 @@
 
 #define DIVUP(x, y) (((x) + (y) - 1)/(y));
 
+namespace cusync {
+
 enum CuStageType {
   CuStageNone =      0,
   Producer    = 1 << 0,
@@ -243,4 +245,5 @@ void initProducerConsumer(Stage1& prod, Stage2& cons) {
   cons.setTileStatusToWait(prod.getTileStatusToPost());
   CUDA_CHECK(cudaMalloc(&prod.kernelExecuted_, sizeof(int)));
   CUDA_CHECK(cudaMemset(prod.kernelExecuted_, 0, sizeof(int)));
+}
 }

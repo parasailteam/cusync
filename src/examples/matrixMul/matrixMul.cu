@@ -37,6 +37,8 @@
 // CuSync include
 #include <cusync/cusync.h>
 
+using namespace cusync;
+
 /**
  * Matrix multiplication (CUDA Kernel) on the device: C = A * B
  * wA is A's width and wB is B's width
