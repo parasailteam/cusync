@@ -109,10 +109,10 @@ using namespace cusync;
   #else
     #error "GPT3 or LLaMA"
   #endif
-  using ProdCuStage = CuStage<CuStageType::Producer, RowMajorXYZ, StridedSyncImpl>;
-  using MiddleCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorXYZ, StridedSyncImpl>;
-  using ConsCuStage = CuStage<CuStageType::Consumer, RowMajorXYZ, TileSync<1>>;
-  using Sync = TileSync<1>;
+  using XQKVCuStage = CuStage<CuStageType::Producer, RowMajorZYX, NoSync, StridedSyncImpl>;
+  using SCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX, StridedSyncImpl, TileSync>;
+  using OCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX, TileSync, TileSync>;
+  using XW12CuStage = CuStage<CuStageType::Consumer, RowMajorZYX, TileSync, NoSync>;
 #else
   #error "Unknown Synchronization"
 #endif 
@@ -991,9 +991,9 @@ int run(int argc, char* argv[]) {
   uint waitValue = DIVUP(min(attnParams.gemm_size1.m(), ShapeMMAThreadBlock::kM), SoftmaxRowTile);
   TileSync<1> sync2(waitValue, 1);
 #elif defined(STRIDEDSYNC)
-    StridedSyncImpl sync1;
-    uint waitValue = DIVUP(min(attnParams.gemm_size1.m(), ShapeMMAThreadBlock::kM), SoftmaxRowTile);
-    TileSync<1> sync2(waitValue, 1);
+  StridedSyncImpl sync1;
+  TileSync sync2(1, 1);
+  TileSync sync3(1, 1);
 #else
   #error "Unknown Policy"
 #endif
