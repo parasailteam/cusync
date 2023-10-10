@@ -284,6 +284,7 @@ public:
             *tileCounter = 0;
           }
           *shared_storage = tileOrder[linear_id];
+          dim3 t = tileOrder[linear_id];
         }
       }    
 

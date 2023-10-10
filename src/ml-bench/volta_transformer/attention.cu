@@ -91,10 +91,10 @@ using ShapeMMAOp = cutlass::gemm::GemmShape<8, 8, 4>;
 using namespace cusync;
 
 #ifdef ROWSYNC 
-  using XQKVCuStage = CuStage<CuStageType::Producer, RowMajorXYZ, NoSync, RowSync>;
-  using SCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorXYZ, RowSync, RowSync>;
-  using OCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorXYZ, RowSync, RowSync>;
-  using XW12CuStage = CuStage<CuStageType::Consumer, RowMajorXYZ, RowSync, NoSync>;
+  using XQKVCuStage = CuStage<CuStageType::Producer, RowMajorZYX, NoSync, RowSync>;
+  using SCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX, RowSync, RowSync>;
+  using OCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX, RowSync, RowSync>;
+  using XW12CuStage = CuStage<CuStageType::Consumer, RowMajorZYX, RowSync, NoSync>;
   using Sync = RowSync;
 #elif defined(TILESYNC)
   using ProdCuStage = CuStage<CuStageType::Producer, RowMajorXYZ, TileSync<1>>;
@@ -116,7 +116,6 @@ using namespace cusync;
 #else
   #error "Unknown Synchronization"
 #endif 
-
 
 //Element types of A, B, and C
 using ElementAccumulator = float;
@@ -671,7 +670,6 @@ cudaError_t runAttentionCuSync(int split_k1, int split_k2, int split_k3, int spl
                                cudaStream_t streams[],
                                double& execTime,
                                int iters = 100) {  
-  printf("split_k1 %d, split_k2 %d, split_k3 %d, split_k4 %d\n", split_k1, split_k2, split_k3, split_k4);
   //Setup XQKV = X * QKV GeMM
   typename XQKVCuSyncGemmTy::Arguments args1{xqkvstage,
                                             attnParams.gemm_size_xqkv,
@@ -760,7 +758,7 @@ cudaError_t runAttentionCuSync(int split_k1, int split_k2, int split_k3, int spl
     xqkvstage.invokeWaitKernel(streams[1]);
     status = gemm_op2.run(true, NULL, streams[1]);
     CUTLASS_CHECK(status);
-    
+
     scustage.invokeWaitKernel(streams[2]);
     status = gemm_op3.run(true, NULL, streams[2]);
     CUTLASS_CHECK(status);
@@ -971,13 +969,13 @@ int run(int argc, char* argv[]) {
                    split_k1};
   dim3 gridDim2 = {(uint)DIVUP(attnParams.gemm_size_s.m(), ShapeMMAThreadBlock::kM),
                    (uint)DIVUP(attnParams.gemm_size_s.n(), ShapeMMAThreadBlock::kN),
-                   split_k1};
+                   split_k2};
   dim3 gridDim3 = {(uint)DIVUP(attnParams.gemm_size_o.m(), ShapeMMAThreadBlock::kM), 
                    (uint)DIVUP(attnParams.gemm_size_o.n(), ShapeMMAThreadBlock::kN),
-                   split_k2};
+                   split_k3};
   dim3 gridDim4 = {(uint)DIVUP(attnParams.gemm_size_xw12.m(), ShapeMMAThreadBlock::kM), 
                    (uint)DIVUP(attnParams.gemm_size_xw12.n(), ShapeMMAThreadBlock::kN),
-                   split_k2};
+                   split_k4};
   dim3 tileSize = {ShapeMMAThreadBlock::kM, ShapeMMAThreadBlock::kN, 1};
 
 #ifdef ROWSYNC
