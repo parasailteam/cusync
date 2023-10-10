@@ -119,13 +119,13 @@ bool equals(size_t size, T* mat1, T* mat2, float err) {
       if (err <= v) {
         ret = true;
       } else {
-        printf("243: %f , %f at %lu, %f\n", e1, e2, i, err);
+        // printf("243: %f , %f at %lu, %f\n", e1, e2, i, err);
         ret = false;
       }
     }
 
     if (ret == false) {
-      // printf("%f != %f at %lu\n", e1, e2, i);
+      printf("%f != %f at %lu\n", e1, e2, i);
       eq = false;
     }
   }

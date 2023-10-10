@@ -42,7 +42,7 @@
 // #define AVOID_WAIT_KERNEL
 // #endif
 
-#include<cuSync.h>
+#include<cusync/cusync.h>
 
 #include "common.h"
 
@@ -88,17 +88,17 @@ struct StridedSync {
 
 const int SoftmaxThreads = ShapeMMAThreadBlock::kN;
 using ShapeMMAOp = cutlass::gemm::GemmShape<8, 8, 4>;  
-
+using namespace cusync;
 
 #ifdef ROWSYNC 
-  using ProdCuStage = CuStage<CuStageType::Producer, RowMajor, RowSync>;
-  using MiddleCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajor, RowSync>;
-  using ConsCuStage = CuStage<CuStageType::Consumer, RowMajor, RowSync>;
+  using ProdCuStage = CuStage<CuStageType::Producer, RowMajorXYZ, RowSync>;
+  using MiddleCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorXYZ, RowSync>;
+  using ConsCuStage = CuStage<CuStageType::Consumer, RowMajorXYZ, RowSync>;
   using Sync = RowSync;
 #elif defined(TILESYNC)
-  using ProdCuStage = CuStage<CuStageType::Producer, RowMajor, TileSync<1>>;
-  using MiddleCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajor, TileSync<1>>;
-  using ConsCuStage = CuStage<CuStageType::Consumer, RowMajor, TileSync<1>>;
+  using ProdCuStage = CuStage<CuStageType::Producer, RowMajorXYZ, TileSync<1>>;
+  using MiddleCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorXYZ, TileSync<1>>;
+  using ConsCuStage = CuStage<CuStageType::Consumer, RowMajorXYZ, TileSync<1>>;
   using Sync = TileSync<1>;
 #elif defined(STRIDEDSYNC)
   #if defined(GPT3)
@@ -108,16 +108,13 @@ using ShapeMMAOp = cutlass::gemm::GemmShape<8, 8, 4>;
   #else
     #error "GPT3 or LLaMA"
   #endif
-  using ProdCuStage = CuStage<CuStageType::Producer, RowMajor, StridedSyncImpl>;
-  using MiddleCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajor, StridedSyncImpl>;
-  using ConsCuStage = CuStage<CuStageType::Consumer, RowMajor, TileSync<1>>;
+  using ProdCuStage = CuStage<CuStageType::Producer, RowMajorXYZ, StridedSyncImpl>;
+  using MiddleCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorXYZ, StridedSyncImpl>;
+  using ConsCuStage = CuStage<CuStageType::Consumer, RowMajorXYZ, TileSync<1>>;
   using Sync = TileSync<1>;
 #else
   #error "Unknown Synchronization"
 #endif 
-
-using CuSyncImpl1 = CuSync<ProdCuStage, MiddleCuStage>;
-using CuSyncImpl2 = CuSync<MiddleCuStage, ConsCuStage>;
 
 
 //Element types of A, B, and C
@@ -152,12 +149,29 @@ class BaseMLPGemm : public cutlass::gemm::device::Gemm<ElementInputA, LayoutInpu
                                                         SmArch, ShapeMMAThreadBlock,
                                                         ShapeMMAWarp, ShapeMMAOp,
                                                         EpilogueOp, 
-                                                        cutlass::gemm::threadblock::GemmHorizontalThreadblockSwizzle, 
+                                                        cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>, 
                                                         2, 8, 8, splitK> {};
 
 // Baseline GeMMs
 using Gemm1 = BaseMLPGemm<false>;
 using Gemm2 = BaseMLPGemm<false>;
+using LayoutK = cutlass::layout::ColumnMajor;
+
+// using LayoutK = cutlass::layout::RowMajor;
+
+template<bool splitK>
+class BColumnMajorGemm : public cutlass::gemm::device::Gemm<ElementInputA, LayoutInputA, 
+                                                     ElementInputB, LayoutK,
+                                                     ElementOutput, LayoutOutput,
+                                                     ElementAccumulator, MMAOp,
+                                                     SmArch, ShapeMMAThreadBlock,
+                                                     ShapeMMAWarp, ShapeMMAOp,
+                                                     EpilogueOp, 
+                                                     cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>, 
+                                                     2, 8, 8, splitK> {};
+
+// Baseline GeMMs
+using BColumnMajorGemm1 = BColumnMajorGemm<false>;
 
 //Baseline GeMMs with SplitK enabled
 using GemmSplitK1 = BaseMLPGemm<true>;
@@ -185,41 +199,57 @@ using CuSyncGemmSplitK2 = CuSyncAttentionGemm<ConsCuStage, true>;
 using HostTensor = cutlass::HostTensor<ElementInputA, LayoutInputA>;
 
 struct AttentionParams {
+  //Attention does following computations:
+  //XQKV = X * QKV
+  //Q, K, V = QKV[:,0:H/3], QKV[:,H/3:2H/3] , QKV[:,2H/3]
+  //S = Q * K^T
+  //P = softmax(S)
+  //O = P * V
+  //XW12 = O * W2  
   HostTensor x;
   HostTensor qkv;
   HostTensor xqkv;
-  HostTensor xdot;
+  HostTensor s;
+  HostTensor p;
+  HostTensor o;
   HostTensor w2;
   HostTensor xw12;
 
   HostTensor ref_xqkv;
-  HostTensor ref_xdot;
+  HostTensor ref_s;
+  HostTensor ref_p;
+  HostTensor ref_o;
   HostTensor ref_xw12;
 
-  cutlass::gemm::GemmCoord gemm_size1, gemm_size2;
+  cutlass::gemm::GemmCoord gemm_size_xqkv, gemm_size_s, gemm_size_o, gemm_size_xw12;
   curandState* randStates;
   bool refCheck;
   ElementComputeEpilogue alpha;
   ElementComputeEpilogue beta;
 
   AttentionParams(int problem[4], bool check) {
-    gemm_size1 = cutlass::gemm::GemmCoord(problem[0], problem[1] * 3, problem[2]);
-    gemm_size2 = cutlass::gemm::GemmCoord(problem[0], problem[3], problem[1]);
+    gemm_size_xqkv = cutlass::gemm::GemmCoord(problem[0], problem[1] * 3, problem[2]);
+    gemm_size_s = cutlass::gemm::GemmCoord(problem[0], problem[0], problem[1]);
+    gemm_size_o = cutlass::gemm::GemmCoord(problem[0], problem[1], problem[0]);
+    gemm_size_xw12 = cutlass::gemm::GemmCoord(problem[0], problem[3], problem[3]);
+    
     alpha = ElementComputeEpilogue(1);
     beta = ElementComputeEpilogue(0);
   
-    x    = HostTensor(gemm_size1.mk());
-    qkv  = HostTensor(gemm_size1.kn());
-    xqkv = HostTensor(gemm_size1.mn());
-    xdot = HostTensor({gemm_size1.m(), gemm_size1.n()/3});
-    w2   = HostTensor(gemm_size2.kn());
-    xw12 = HostTensor(gemm_size2.mn());
+    x    = HostTensor(gemm_size_xqkv.mk());
+    qkv  = HostTensor(gemm_size_xqkv.kn());
+    xqkv = HostTensor(gemm_size_xqkv.mn());
+    s = HostTensor(gemm_size_s.mn());
+    o = HostTensor(gemm_size_o.mn());
+    w2   = HostTensor(gemm_size_xw12.kn());
+    xw12 = HostTensor(gemm_size_xw12.mn());
 
-    ref_xdot = HostTensor({gemm_size1.m(), gemm_size1.n()/3});
-    ref_xqkv = HostTensor(gemm_size1.mn());
-    ref_xw12 = HostTensor(gemm_size2.mn());
+    ref_xqkv = HostTensor(gemm_size_xqkv.mn());
+    ref_s = HostTensor(gemm_size_s.mn());
+    ref_o = HostTensor(gemm_size_o.mn());
+    ref_xw12 = HostTensor(gemm_size_xw12.mn());
 
-    size_t numRandStates = gemm_size1.m() * 1024;
+    size_t numRandStates = gemm_size_xqkv.m() * 1024;
     CUDA_CHECK(cudaMalloc(&randStates, sizeof(curandState)*(numRandStates)));
     init_curand_states<<<numRandStates/128, 128>>>(randStates, numRandStates);
     CUDA_CHECK(cudaDeviceSynchronize());
@@ -228,10 +258,10 @@ struct AttentionParams {
 
   void initIns() {
     if (refCheck) {
-      memset_random2(x.host_data(), ElementOutput(0.02), 
-                     ElementOutput(0.03), x.size());
-      memset_random2(qkv.host_data(), ElementOutput(0.01), 
-                     ElementOutput(0.035), qkv.size());
+      memset_random2(x.host_data(), ElementOutput(0.005), 
+                     ElementOutput(0.01), x.size());
+      memset_random2(qkv.host_data(), ElementOutput(0.005), 
+                     ElementOutput(0.01), qkv.size());
       memset_random2(w2.host_data(), ElementOutput(0.01),
                      ElementOutput(0.05), w2.size());
     } else {
@@ -252,105 +282,109 @@ struct AttentionParams {
   void initOuts() {
     //Zeros all output tensors
     cutlass::reference::host::TensorFill(xqkv.host_view());
+    cutlass::reference::host::TensorFill(s.host_view());
+    cutlass::reference::host::TensorFill(p.host_view());
+    cutlass::reference::host::TensorFill(o.host_view());
     cutlass::reference::host::TensorFill(xw12.host_view());
-    cutlass::reference::host::TensorFill(xdot.host_view());
   }
 
   void initRefs() {
     cutlass::reference::host::TensorFill(ref_xqkv.host_view());
-    cutlass::reference::host::TensorFill(ref_xdot.host_view());
+    cutlass::reference::host::TensorFill(ref_s.host_view());
+    cutlass::reference::host::TensorFill(ref_p.host_view());
+    cutlass::reference::host::TensorFill(ref_o.host_view());
     cutlass::reference::host::TensorFill(ref_xw12.host_view());
   }
 };
 
-template<uint NTHREADS, typename T, typename AT, uint TileM, uint TileN, uint RowTile, bool enableOverlap>
-__global__ void selfAttnDotProdSoftmaxDropout(uint32_t M, uint32_t N,
-                                              T* XQKV, T* out, float p,
-                                              curandState* randStates,
-                                              MiddleCuStage cons1, MiddleCuStage prod2) {
-  extern __shared__ half xqkRows[];
+// template<uint NTHREADS, typename T, typename AT, uint TileM, uint TileN, uint RowTile, bool enableOverlap>
+// __global__ void selfAttnDotProdSoftmaxDropout(uint32_t M, uint32_t N,
+//                                               T* XQKV, T* out, float p,
+//                                               curandState* randStates,
+//                                               MiddleCuStage cons1, MiddleCuStage prod2) {
+//   extern __shared__ half xqkRows[];
 
-  __shared__ AT sum;
-  if (enableOverlap)
-    prod2.tile(nullptr);
-  int linearThreadId = blockIdx.x * blockDim.x + threadIdx.x;
-  curandState* localRandState = &randStates[linearThreadId];
-  // __shared__ shRandStates[sizeof(curandState) * NTHREADS];
-  uint ROW = blockIdx.x * RowTile;
-  const uint tileRow = blockIdx.x;
-  const uint tileM = ROW/TileM;
-  if (enableOverlap) {
-    // && tileM == 0) printf("TileM %d TileN %d ROW %d\n", TileM, TileN, ROW);
-    // handle1.waitOnTilesWithSyncValue(tileM, 0, 0, 1);
-    // if (tileM < M/TileM) {
-    //   {tileM + 1, 0, 0};
-    //   handle1.waitOnTile();
-    // }
-  }
+//   __shared__ AT sum;
+//   if (enableOverlap)
+//     prod2.tile(nullptr);
+//   int linearThreadId = blockIdx.x * blockDim.x + threadIdx.x;
+//   curandState* localRandState = &randStates[linearThreadId];
+//   // __shared__ shRandStates[sizeof(curandState) * NTHREADS];
+//   uint ROW = blockIdx.x * RowTile;
+//   const uint tileRow = blockIdx.x;
+//   const uint tileM = ROW/TileM;
+//   if (enableOverlap) {
+//     // && tileM == 0) printf("TileM %d TileN %d ROW %d\n", TileM, TileN, ROW);
+//     // handle1.waitOnTilesWithSyncValue(tileM, 0, 0, 1);
+//     // if (tileM < M/TileM) {
+//     //   {tileM + 1, 0, 0};
+//     //   handle1.waitOnTile();
+//     // }
+//   }
 
-  for (uint ti = 0; ti < RowTile && ROW < M; ti++) {
-    if (threadIdx.x == 0) {
-      sum = 0;
-    }
+//   for (uint ti = 0; ti < RowTile && ROW < M; ti++) {
+//     if (threadIdx.x == 0) {
+//       sum = 0;
+//     }
 
-    AT threadSum = (AT)0.0f;
+//     AT threadSum = (AT)0.0f;
 
-    for (uint COL = threadIdx.x; COL < N; COL += blockDim.x) {
-      if (enableOverlap) {
-        if (ti == 0 && ROW % TileM == 0) {
-          dim3 tile = {tileM, COL/TileN, 0};
-          cons1.wait(tile, (COL/TileN)%NTHREADS);
-        }
-      }
-      T xq = XQKV[ROW * 3 * N + COL];
-      if (enableOverlap  && ti == 0 && ROW % TileM == 0) {
-        dim3 tile = {tileM, N/TileN + COL/TileN, 0};
-        #ifdef TILESYNC
-        cons1.wait(tile, (COL/TileN)%NTHREADS);
-        #endif
-      }
-      T xk = XQKV[ROW * 3 * N + (COL + N)];
-      T xqk = xq * xk;
-      threadSum += (AT)exp((AT)xqk);
-      xqkRows[COL] = xqk;
-    }
-    __syncthreads();
-    atomicAdd(&sum, (AT)threadSum);
-    __syncthreads();
-    for (uint COL = threadIdx.x; COL < N; COL += blockDim.x) {
-      float r = curand_uniform(localRandState);
-      // if (enableOverlap && ti == 0) {
-      //   if (rowSyncOrTileSync) {
+//     for (uint COL = threadIdx.x; COL < N; COL += blockDim.x) {
+//       if (enableOverlap) {
+//         if (ti == 0 && ROW % TileM == 0) {
+//           dim3 tile = {tileM, COL/TileN, 0};
+//           cons1.wait(tile, (COL/TileN)%NTHREADS);
+//         }
+//       }
+//       T xq = XQKV[ROW * 3 * N + COL];
+//       if (enableOverlap  && ti == 0 && ROW % TileM == 0) {
+//         dim3 tile = {tileM, N/TileN + COL/TileN, 0};
+//         #ifdef TILESYNC
+//         cons1.wait(tile, (COL/TileN)%NTHREADS);
+//         #endif
+//       }
+//       T xk = XQKV[ROW * 3 * N + (COL + N)];
+//       T xqk = xq * xk;
+//       threadSum += (AT)exp((AT)xqk);
+//       xqkRows[COL] = xqk;
+//     }
+//     __syncthreads();
+//     atomicAdd(&sum, (AT)threadSum);
+//     __syncthreads();
+//     for (uint COL = threadIdx.x; COL < N; COL += blockDim.x) {
+//       float r = curand_uniform(localRandState);
+//       // if (enableOverlap && ti == 0) {
+//       //   if (rowSyncOrTileSync) {
 
-      //   } else {
-      if (enableOverlap && ti == 0 && ROW % TileM == 0) {
-        dim3 tile = {tileM, N/TileN*2 + COL/TileN, 0};
-        #ifndef TILESYNC
-        cons1.wait(tile, (COL/TileN)%NTHREADS);
-        #endif
-      }
-      __half v = (r <= p) ? (__half)(((float)(exp((AT)xqkRows[COL]) * 
-                                     (float)XQKV[ROW* 3 * N + (COL + 2 * N)]))/sum) : (__half)0.0f;
-      out[ROW * N + COL] = v;
-      if (enableOverlap && ti == SoftmaxRowTile - 1) {
-        dim3 tile = {tileM, COL/TileN, 0};
-        prod2.post(tile, ((COL/TileN)*TileN)%NTHREADS);
-      }
-    }
-    __syncthreads();
+//       //   } else {
+//       if (enableOverlap && ti == 0 && ROW % TileM == 0) {
+//         dim3 tile = {tileM, N/TileN*2 + COL/TileN, 0};
+//         #ifndef TILESYNC
+//         cons1.wait(tile, (COL/TileN)%NTHREADS);
+//         #endif
+//       }
+//       __half v = (r <= p) ? (__half)(((float)(exp((AT)xqkRows[COL]) * 
+//                                      (float)XQKV[ROW* 3 * N + (COL + 2 * N)]))/sum) : (__half)0.0f;
+//       out[ROW * N + COL] = v;
+//       if (enableOverlap && ti == SoftmaxRowTile - 1) {
+//         dim3 tile = {tileM, COL/TileN, 0};
+//         prod2.post(tile, ((COL/TileN)*TileN)%NTHREADS);
+//       }
+//     }
+//     __syncthreads();
 
-    ROW++;
-  }
+//     ROW++;
+//   }
 
-  // if (enableOverlap) {
-  //   if (rowSyncOrTileSync) {
-  //     // tileM = ROW/TileM;
-  //     handle2.setRowStatus(tileM, 0, 0, RowTile);
-  //   } else {
+//   // if (enableOverlap) {
+//   //   if (rowSyncOrTileSync) {
+//   //     // tileM = ROW/TileM;
+//   //     handle2.setRowStatus(tileM, 0, 0, RowTile);
+//   //   } else {
       
-  //   }
-  // }
-}
+//   //   }
+//   // }
+// }
 
 void attnRefMatmul(cutlass::gemm::GemmCoord size, ElementOutput* a, ElementOutput* b, ElementOutput* c) {
   ref_matmul<ElementOutput, ElementAccumulator>(size.m(), size.n(), 
@@ -358,37 +392,64 @@ void attnRefMatmul(cutlass::gemm::GemmCoord size, ElementOutput* a, ElementOutpu
 }
 
 cudaError_t host_attention(AttentionParams& attnParams) {
-  attnRefMatmul(attnParams.gemm_size1, attnParams.x.device_data(), 
+  attnRefMatmul(attnParams.gemm_size_xqkv, attnParams.x.device_data(), 
                 attnParams.qkv.device_data(), attnParams.ref_xqkv.host_data());
   
-  size_t xq_size = attnParams.ref_xdot.size();
-  assert(attnParams.ref_xdot.size() == attnParams.gemm_size1.m() * attnParams.gemm_size1.n()/3);
-  size_t N = attnParams.gemm_size1.n()/3;
+  //assert(attnParams.ref_xdot.size() == attnParams.gemm_size1.m() * attnParams.gemm_size1.n()/3);
+  size_t N = attnParams.gemm_size_xqkv.n()/3;
+  size_t B = attnParams.gemm_size_xqkv.m();
   ElementOutput* host_xqkv = attnParams.ref_xqkv.host_data();
-  ElementOutput* host_xdot = attnParams.ref_xdot.host_data();
 
-  for (size_t row = 0; row < attnParams.gemm_size1.m(); row++) {
-    for (size_t col = 0; col < attnParams.gemm_size1.n()/3; col++) {
-      ElementOutput xqk = host_xqkv[row * 3 * N + col] * host_xqkv[row * 3 * N + (col + N)];
-      host_xdot[row * N + col] = xqk;
+  ElementOutput* host_s = attnParams.ref_s.host_data();
+
+  for (size_t i = 0; i < B; i++) {
+    for (size_t j = 0; j < B; j++) {
+      ElementAccumulator result = 0.0f;
+      ElementOutput r1 = (ElementOutput)0.0f;
+
+      for (size_t k = 0; k < N; k++) {
+        ElementOutput host_xq = host_xqkv[i * 3 * N + k];
+        ElementOutput host_xk = host_xqkv[j * 3 * N + k + N];
+        result += host_xq * host_xk;
+        r1 += host_xq * host_xk;
+      }
+      if (i == 0 and j == 0) printf("415: %f\n", (float)r1);
+      host_s[i * B + j] = (ElementOutput)result;
     }
   }
 
-  for (size_t ROW = 0; ROW < attnParams.gemm_size1.m(); ROW++) {
+  ElementOutput* host_p = new ElementOutput[B * B];
+
+  for (size_t i = 0; i < B; i++) {
     float sum = 0.0f;
-    for (size_t COL = 0; COL < attnParams.gemm_size1.n()/3; COL++) {
-      sum += exp((float)host_xdot[ROW*N + COL]);
+    for (size_t j = 0; j < B; j++) {
+      sum += exp((float)host_s[i*B + j]);
     }
     
-    for (size_t COL = 0; COL < attnParams.gemm_size1.n()/3; COL++) {
+    for (size_t j = 0; j < B; j++) {
       //Assume dropout probability is 1.0
-      host_xdot[ROW*N + COL] = (exp(host_xdot[ROW*N + COL]) * host_xqkv[ROW*3*N + COL+2*N])/sum;
+      host_p[i*B + j] = exp(host_s[i*B + j])/sum;
     }
   }
   
-  attnParams.ref_xdot.sync_device();
+  ElementOutput* host_o = attnParams.ref_o.host_data();
+  
+  for (size_t i = 0; i < B; i++) {
+    for (size_t j = 0; j < N; j++) {
+      ElementAccumulator result = 0.0f;
+      
+      for (size_t k = 0; k < B; k++) {
+        ElementOutput host_xv = host_xqkv[k * 3 * N + j + N * 2];
+        
+        result += host_xv * host_p[i*B + k];
+      }
+      host_o[i * N + j] = (ElementOutput)result;
+    }
+  }
 
-  attnRefMatmul(attnParams.gemm_size2, attnParams.ref_xdot.device_data(), 
+  attnParams.ref_o.sync_device();
+
+  attnRefMatmul(attnParams.gemm_size_xw12, attnParams.ref_o.device_data(), 
                 attnParams.w2.device_data(), attnParams.ref_xw12.host_data());
   
   return cudaSuccess;
@@ -396,32 +457,25 @@ cudaError_t host_attention(AttentionParams& attnParams) {
 
 cudaError_t check_results(AttentionParams& attnParams) {
   attnParams.xqkv.sync_host();
-  printf("Checking First GeMM output\n");
+  printf("Checking XQKV=X*QKV\n");
   bool eq = equals(attnParams.ref_xqkv.size(), 
                    attnParams.ref_xqkv.host_data(), 
                    attnParams.xqkv.host_data(), 1e-1f);
   if (eq == false) {
-    printf("First GeMM not correct\n");
+    printf("not correct\n");
     return cudaErrorUnknown;
   }
-  attnParams.xdot.sync_host();
-  printf("Checking Dot Dropout kernel\n");
-  eq = equals(attnParams.ref_xdot.size(), attnParams.ref_xdot.host_data(),
-              attnParams.xdot.host_data(), 1e-1f);
+  printf("465: %f\n", (float)attnParams.xqkv.host_data()[0]);
+  attnParams.s.sync_host();
+  printf("Checking S=Q*K.T\n");
+  eq = equals(attnParams.ref_s.size(), attnParams.ref_s.host_data(),
+              attnParams.s.host_data(), 1e-1f);
   if (eq == false) {
-    printf("Dot not correct\n");
+    printf("not correct\n");
     return cudaErrorUnknown;
   }
 
-  attnParams.xw12.sync_host();
-  printf("Checking second GeMM\n");
-  eq = equals(attnParams.ref_xw12.size(), attnParams.ref_xw12.host_data(), 
-              attnParams.xw12.host_data(), 1e-1);
-  if (eq == false) {
-    printf("Second GeMM not correct\n");
-    return cudaErrorUnknown;
-  }
-  printf("Self-Attention Passed\n");
+  printf("Passed\n");
 
   return cudaSuccess;
 }
@@ -446,7 +500,7 @@ cudaError_t runAttentionBaseline(int split_k1, int split_k2,
   cutlass::Status status;
 
   //Setup First GeMM
-  typename GemmTy1::Arguments args1{attnParams.gemm_size1,
+  typename GemmTy1::Arguments args1{attnParams.gemm_size_xqkv,
                                     attnParams.x.device_ref(),
                                     attnParams.qkv.device_ref(),
                                     attnParams.xqkv.device_ref(),
@@ -461,20 +515,61 @@ cudaError_t runAttentionBaseline(int split_k1, int split_k2,
   status = gemm_op1.initialize(args1, workspace1.get());
   CUTLASS_CHECK(status);
 
-  //Setup Second GeMM
-  typename GemmTy2::Arguments args2{attnParams.gemm_size2,
-                                    attnParams.xdot.device_ref(),
+  size_t N = attnParams.gemm_size_xqkv.n()/3;
+
+  ElementOutput* device_xq = attnParams.xqkv.device_data() + 0;
+  cutlass::TensorRef xq{device_xq, LayoutInputA(3*N)}; 
+  ElementOutput* device_xk = attnParams.xqkv.device_data() + N;
+  cutlass::TensorRef xk{device_xk, LayoutK(3*N)};
+
+  //Setup S=Q*K.T GeMM
+  typename BColumnMajorGemm1::Arguments args2{attnParams.gemm_size_s,
+                                              xq, xk,
+                                              attnParams.s.device_ref(),
+                                              attnParams.s.device_ref(),
+                                              {attnParams.alpha, attnParams.beta},
+                                              split_k2};
+  workspace_size = BColumnMajorGemm1::get_workspace_size(args2);
+  cutlass::device_memory::allocation<uint8_t> workspace2(workspace_size);
+  BColumnMajorGemm1 gemm_op2;
+  status = gemm_op2.can_implement(args2);
+  CUTLASS_CHECK(status);
+  status = gemm_op2.initialize(args2, workspace2.get());
+  CUTLASS_CHECK(status);
+
+  ElementOutput* device_xv = attnParams.xqkv.device_data() + N;
+  cutlass::TensorRef xv{device_xv, LayoutInputB(3*N)};
+
+  //Setup O=S*V GeMM
+  typename GemmTy1::Arguments args3{attnParams.gemm_size_o,
+                                             attnParams.s.device_ref(),
+                                             xv,
+                                             attnParams.o.device_ref(),
+                                             attnParams.o.device_ref(),
+                                             {attnParams.alpha, attnParams.beta},
+                                             split_k2};
+  workspace_size = GemmTy1::get_workspace_size(args3);
+  cutlass::device_memory::allocation<uint8_t> workspace3(workspace_size);
+  GemmTy1 gemm_op3;
+  status = gemm_op3.can_implement(args3);
+  CUTLASS_CHECK(status);
+  status = gemm_op3.initialize(args3, workspace3.get());
+  CUTLASS_CHECK(status);
+
+  //Setup XW12=O*W12 GeMM
+  typename GemmTy2::Arguments args4{attnParams.gemm_size_xw12,
+                                    attnParams.o.device_ref(),
                                     attnParams.w2.device_ref(),
                                     attnParams.xw12.device_ref(),
                                     attnParams.xw12.device_ref(),
                                     {attnParams.alpha, attnParams.beta},
                                     split_k2};
-  workspace_size = GemmTy2::get_workspace_size(args2);
-  cutlass::device_memory::allocation<uint8_t> workspace2(workspace_size);
-  GemmTy2 gemm_op2;
-  status = gemm_op2.can_implement(args2);
+  workspace_size = GemmTy2::get_workspace_size(args4);
+  cutlass::device_memory::allocation<uint8_t> workspace4(workspace_size);
+  GemmTy2 gemm_op4;
+  status = gemm_op4.can_implement(args4);
   CUTLASS_CHECK(status);
-  status = gemm_op2.initialize(args2, workspace2.get());
+  status = gemm_op4.initialize(args4, workspace4.get());
   CUTLASS_CHECK(status);
 
   execTime = 0;
@@ -489,26 +584,21 @@ cudaError_t runAttentionBaseline(int split_k1, int split_k2,
     double iterMatMul1 = middle1-start;
     matmul1Time += iterMatMul1;
     
-    selfAttnDotProdSoftmaxDropout<SoftmaxThreads, half, float, 
-                                  ShapeMMAThreadBlock::kM, ShapeMMAThreadBlock::kN,
-                                  SoftmaxRowTile, false>
-                                  <<<DIVUP(attnParams.gemm_size1.m(), SoftmaxRowTile), 
-                                    SoftmaxThreads, 
-                                    attnParams.gemm_size1.n()/3 * sizeof(half), 
-                                    streams[0]>>>
-                                    (attnParams.gemm_size1.m(), 
-                                    attnParams.gemm_size1.n()/3, 
-                                    (half*)attnParams.xqkv.device_data(),
-                                    (half*)attnParams.xdot.device_data(), 
-                                    1.0f, attnParams.randStates,
-                                    MiddleCuStage(), MiddleCuStage());
-    CUDA_CHECK(cudaStreamSynchronize(streams[0]));
     double middle2 = timeInMicroSeconds();
     double iterSoftmax = middle2-middle1;
     softmaxTime += iterSoftmax;
     status = gemm_op2(streams[0]);
-    CUTLASS_CHECK(status);
+    // CUTLASS_CHECK(status);
     CUDA_CHECK(cudaDeviceSynchronize());
+
+    status = gemm_op3(streams[0]);
+    // CUTLASS_CHECK(status);
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+    status = gemm_op4(streams[0]);
+    // CUTLASS_CHECK(status);
+    CUDA_CHECK(cudaDeviceSynchronize());
+
     double middle3 = timeInMicroSeconds();
     double iterMatmul2 = middle3-middle2;
     matmul2Time += iterMatmul2;
@@ -544,6 +634,8 @@ cudaError_t runAttentionBaseline(int split_k1, int split_k2,
 
   return result;
 }
+
+#if 0
 
 //Self-Attention using CuSync
 template<typename GemmTy1, typename GemmTy2>
@@ -672,6 +764,7 @@ cudaError_t runAttentionCuSync(int split_k1, int split_k2,
 
   return result;
 }
+#endif
 
 int run(int argc, char* argv[]) {
   cudaDeviceProp props;
@@ -817,6 +910,7 @@ int run(int argc, char* argv[]) {
     printf("END-BASELINE: {\"Total\": %lf, \"matmul1Time\": %lf, \"softmaxTime\": %lf, \"matmul2Time\": %lf} microseconds\n", baselineTime/(float)epochs, matmul1Time/(float)epochs, softmaxTime/(float)epochs, matmul2Time/(float)epochs);
   }
   
+  #if 0
   attnParams.initOuts();
 
   dim3 gridDim1 = {(uint)DIVUP(attnParams.gemm_size1.m(), ShapeMMAThreadBlock::kM),
@@ -881,6 +975,6 @@ int run(int argc, char* argv[]) {
     
     printf("END-OVERLAPPED: {\"Total\": %lf} microseconds\n", overlapTime/(float)epochs);
   }
-
+  #endif
   return 0;
 }
