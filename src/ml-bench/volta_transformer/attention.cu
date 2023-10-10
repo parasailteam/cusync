@@ -97,10 +97,10 @@ using namespace cusync;
   using XW12CuStage = CuStage<CuStageType::Consumer, RowMajorZYX, RowSync, NoSync>;
   using Sync = RowSync;
 #elif defined(TILESYNC)
-  using ProdCuStage = CuStage<CuStageType::Producer, RowMajorXYZ, TileSync<1>>;
-  using MiddleCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorXYZ, TileSync<1>>;
-  using ConsCuStage = CuStage<CuStageType::Consumer, RowMajorXYZ, TileSync<1>>;
-  using Sync = TileSync<1>;
+  using XQKVCuStage = CuStage<CuStageType::Producer, RowMajorZYX, NoSync, TileSync>;
+  using SCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX, TileSync, TileSync>;
+  using OCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX, TileSync, TileSync>;
+  using XW12CuStage = CuStage<CuStageType::Consumer, RowMajorZYX, TileSync, NoSync>;
 #elif defined(STRIDEDSYNC)
   #if defined(GPT3)
     using StridedSyncImpl = StridedSync<12288, ShapeMMAThreadBlock::kN, 3>;
@@ -985,11 +985,7 @@ int run(int argc, char* argv[]) {
   RowSync sync3(gridDim3.y);
   RowSync sync4(gridDim4.y);
 #elif defined(TILESYNC)
-  using Sync1 = TileSync<1>;
-  using Sync2 = Sync1;
-  TileSync<1> sync1;
-  uint waitValue = DIVUP(min(attnParams.gemm_size1.m(), ShapeMMAThreadBlock::kM), SoftmaxRowTile);
-  TileSync<1> sync2(waitValue, 1);
+  TileSync sync1(1,1), sync2(1,1), sync3(1,1), sync4(1,1);
 #elif defined(STRIDEDSYNC)
   StridedSyncImpl sync1;
   TileSync sync2(1, 1);
