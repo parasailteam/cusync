@@ -91,9 +91,10 @@ using ShapeMMAOp = cutlass::gemm::GemmShape<8, 8, 4>;
 using namespace cusync;
 
 #ifdef ROWSYNC 
-  using ProdCuStage = CuStage<CuStageType::Producer, RowMajorXYZ, RowSync>;
-  using MiddleCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorXYZ, RowSync>;
-  using ConsCuStage = CuStage<CuStageType::Consumer, RowMajorXYZ, RowSync>;
+  using XQKVCuStage = CuStage<CuStageType::Producer, RowMajorXYZ, NoSync, RowSync>;
+  using SCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorXYZ, RowSync, RowSync>;
+  using OCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorXYZ, RowSync, RowSync>;
+  using XW12CuStage = CuStage<CuStageType::Consumer, RowMajorXYZ, RowSync, NoSync>;
   using Sync = RowSync;
 #elif defined(TILESYNC)
   using ProdCuStage = CuStage<CuStageType::Producer, RowMajorXYZ, TileSync<1>>;
@@ -174,26 +175,41 @@ using BColumnMajorGemmSplitK1 = BColumnMajorGemm<true>;
 
 //Baseline GeMMs with SplitK enabled
 using GemmSplitK1 = BaseMLPGemm<true>;
-using GemmSplitK2 = BaseMLPGemm<true>;
 
 //CuSync GeMMs
 template<typename CuStage, bool splitK>
 class CuSyncAttentionGemm : public cutlass::gemm::device::CuSyncGemm<CuStage, 
-                                                        ElementInputA, LayoutInputA, 
-                                                        ElementInputB, LayoutInputB,
-                                                        ElementOutput, LayoutOutput,
-                                                        ElementAccumulator, MMAOp,
-                                                        SmArch, ShapeMMAThreadBlock,
-                                                        ShapeMMAWarp, ShapeMMAOp,
-                                                        EpilogueOp, 
-                                                        cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>, 
-                                                        2, 8, 8, splitK> {};
+                                                    ElementInputA, LayoutInputA, 
+                                                    ElementInputB, LayoutInputB,
+                                                    ElementOutput, LayoutOutput,
+                                                    ElementAccumulator, MMAOp,
+                                                    SmArch, ShapeMMAThreadBlock,
+                                                    ShapeMMAWarp, ShapeMMAOp,
+                                                    EpilogueOp, 
+                                                    cutlass::gemm::threadblock::CuSyncGemmIdentityThreadblockSwizzle<>, 
+                                                    2, 8, 8, splitK> {};
 
-using CuSyncGemm1 = CuSyncAttentionGemm<ProdCuStage, false>;
-using CuSyncGemm2 = CuSyncAttentionGemm<ConsCuStage, false>;
+template<typename CuStage, bool splitK>
+class CuSyncBColumnMajorGemm : public cutlass::gemm::device::CuSyncGemm<CuStage, ElementInputA, LayoutInputA, 
+                                                     ElementInputB, LayoutK,
+                                                     ElementOutput, LayoutOutput,
+                                                     ElementAccumulator, MMAOp,
+                                                     SmArch, ShapeMMAThreadBlock,
+                                                     ShapeMMAWarp, ShapeMMAOp,
+                                                     EpilogueOp,
+                                                     cutlass::gemm::threadblock::CuSyncGemmIdentityThreadblockSwizzle<>,
+                                                     2, 8, 8, splitK> {};
 
-using CuSyncGemmSplitK1 = CuSyncAttentionGemm<ProdCuStage, true>;
-using CuSyncGemmSplitK2 = CuSyncAttentionGemm<ConsCuStage, true>;
+// CuSync GeMMs
+using XQKVCuSyncGemm = CuSyncAttentionGemm<XQKVCuStage, false>;
+using SCuSyncGemm = CuSyncBColumnMajorGemm<SCuStage, false>;
+using OCuSyncGemm = CuSyncAttentionGemm<OCuStage, false>;
+using XW12CuSyncGemm = CuSyncAttentionGemm<XW12CuStage, false>;
+
+using XQKVCuSyncGemmSplitK = CuSyncAttentionGemm<XQKVCuStage, true>;
+using SCuSyncGemmSplitK = CuSyncBColumnMajorGemm<SCuStage, true>;
+using OCuSyncGemmSplitK = CuSyncAttentionGemm<OCuStage, true>;
+using XW12CuSyncGemmSplitK = CuSyncAttentionGemm<XW12CuStage, true>;
 
 using HostTensor = cutlass::HostTensor<ElementInputA, LayoutInputA>;
 
@@ -230,7 +246,7 @@ struct AttentionParams {
     gemm_size_xqkv = cutlass::gemm::GemmCoord(problem[0], problem[1] * 3, problem[2]);
     gemm_size_s = cutlass::gemm::GemmCoord(problem[0], problem[0], problem[1]);
     gemm_size_o = cutlass::gemm::GemmCoord(problem[0], problem[1], problem[0]);
-    gemm_size_xw12 = cutlass::gemm::GemmCoord(problem[0], problem[3], problem[3]);
+    gemm_size_xw12 = cutlass::gemm::GemmCoord(problem[0], problem[3], problem[1]);
     
     alpha = ElementComputeEpilogue(1);
     beta = ElementComputeEpilogue(0);
@@ -494,8 +510,8 @@ __global__ void print_kernel(ElementOutput* data) {
 }
 
 //Run our baseline of Self-Attention
-template<typename GemmTy1, typename GemmTy2>
-cudaError_t runAttentionBaseline(int split_k1, int split_k2,
+template<typename GemmTy1, typename GemmTy2, typename GemmTy3, typename GemmTy4>
+cudaError_t runAttentionBaseline(int split_k1, int split_k2, int split_k3, int split_k4,
                                  AttentionParams& attnParams,
                                  cudaStream_t streams[],
                                  double& execTime,
@@ -506,7 +522,6 @@ cudaError_t runAttentionBaseline(int split_k1, int split_k2,
                                  int iters = 100) {  
   // ElementOutput* device_xqkv = tensor_xqkv.device_data();
   cutlass::Status status;
-
   //Setup First GeMM
   typename GemmTy1::Arguments args1{attnParams.gemm_size_xqkv,
                                     attnParams.x.device_ref(),
@@ -549,32 +564,32 @@ cudaError_t runAttentionBaseline(int split_k1, int split_k2,
   cutlass::TensorRef xv{device_xv, LayoutInputB(3*N)};
 
   //Setup O=S*V GeMM
-  typename GemmTy1::Arguments args3{attnParams.gemm_size_o,
+  typename GemmTy3::Arguments args3{attnParams.gemm_size_o,
                                     attnParams.s.device_ref(),
                                     xv,
                                     attnParams.o.device_ref(),
                                     attnParams.o.device_ref(),
                                     {attnParams.alpha, attnParams.beta},
-                                    split_k2};
-  workspace_size = GemmTy1::get_workspace_size(args3);
+                                    split_k3};
+  workspace_size = GemmTy3::get_workspace_size(args3);
   cutlass::device_memory::allocation<uint8_t> workspace3(workspace_size);
-  GemmTy1 gemm_op3;
+  GemmTy3 gemm_op3;
   status = gemm_op3.can_implement(args3);
   CUTLASS_CHECK(status);
   status = gemm_op3.initialize(args3, workspace3.get());
   CUTLASS_CHECK(status);
 
   //Setup XW12=O*W12 GeMM
-  typename GemmTy1::Arguments args4{attnParams.gemm_size_xw12,
+  typename GemmTy4::Arguments args4{attnParams.gemm_size_xw12,
                                     attnParams.o.device_ref(),
                                     attnParams.w2.device_ref(),
                                     attnParams.xw12.device_ref(),
                                     attnParams.xw12.device_ref(),
                                     {attnParams.alpha, attnParams.beta},
-                                    split_k2};
-  workspace_size = GemmTy1::get_workspace_size(args4);
+                                    split_k4};
+  workspace_size = GemmTy4::get_workspace_size(args4);
   cutlass::device_memory::allocation<uint8_t> workspace4(workspace_size);
-  GemmTy1 gemm_op4;
+  GemmTy4 gemm_op4;
   status = gemm_op4.can_implement(args4);
   CUTLASS_CHECK(status);
   status = gemm_op4.initialize(args4, workspace4.get());
@@ -623,8 +638,7 @@ cudaError_t runAttentionBaseline(int split_k1, int split_k2,
   return cudaSuccess;
 }
 
-template<typename GemmTy1, typename GemmTy2, typename GemmSplitKTy1, typename GemmSplitKTy2>
-cudaError_t runAttentionBaseline(int split_k1, int split_k2,
+cudaError_t runAttentionBaseline(int split_k1, int split_k2, int split_k3, int split_k4,
                                  AttentionParams& attnParams, 
                                  cudaStream_t streams[],
                                  double& execTime,
@@ -634,103 +648,125 @@ cudaError_t runAttentionBaseline(int split_k1, int split_k2,
                                  double& matmul4Time,
                                  int iters = 100) {
   cudaError_t result;
-  if (split_k1 == 1 && split_k2 == 1) {
-    result = runAttentionBaseline<GemmTy1, GemmTy2>(split_k1, split_k2, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
-  } else if (split_k1 > 1 && split_k2 == 1) {
-    result = runAttentionBaseline<GemmSplitKTy1, GemmTy2>(split_k1, split_k2, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
-  } else if (split_k1 == 1 && split_k2 > 1) {
-    result = runAttentionBaseline<GemmTy1, GemmSplitKTy2>(split_k1, split_k2, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
-  } else if (split_k1 > 1 && split_k2 > 1) {
-    result = runAttentionBaseline<GemmSplitKTy1, GemmSplitKTy2>(split_k1, split_k2, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
+  printf("652: split_k1 %d split_k2 %d split_k3 %d split_k4 %d\n", split_k1, split_k2, split_k3, split_k4);
+
+  if (split_k1 == 1 && split_k4 == 1) {
+    result = runAttentionBaseline<Gemm1, BColumnMajorGemmSplitK1, GemmSplitK1, Gemm1>(split_k1, split_k2, split_k3, split_k4, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
+  } else if (split_k1 > 1 && split_k4 == 1) {
+     result = runAttentionBaseline<GemmSplitK1, BColumnMajorGemmSplitK1, GemmSplitK1, Gemm1>(split_k1, split_k2, split_k3, split_k4, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
+  } else if (split_k1 == 1 && split_k4 > 1) {
+    result = runAttentionBaseline<Gemm1, BColumnMajorGemmSplitK1, GemmSplitK1, GemmSplitK1>(split_k1, split_k2, split_k3, split_k4, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
+  } else if (split_k1 > 1 && split_k4 > 1) {
+    result = runAttentionBaseline<GemmSplitK1, BColumnMajorGemmSplitK1, GemmSplitK1, GemmSplitK1>(split_k1, split_k2, split_k3, split_k4, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
   }
 
   return result;
 }
 
-#if 0
-
 //Self-Attention using CuSync
-template<typename GemmTy1, typename GemmTy2>
-cudaError_t runAttentionCuSync(int split_k1, int split_k2, 
-                               AttentionParams& attnParams, 
-                               CuSyncImpl1& handle1,
-                               CuSyncImpl2& handle2,
+template<typename XQKVCuSyncGemmTy, typename SCuSyncGemmTy, typename OCuSyncGemmTy, typename XW12CuSyncGemmTy>
+cudaError_t runAttentionCuSync(int split_k1, int split_k2, int split_k3, int split_k4,
+                               AttentionParams& attnParams,
+                               XQKVCuStage& xqkvstage, SCuStage& scustage, OCuStage& ocustage, XW12CuStage& xw12custage,
                                cudaStream_t streams[],
                                double& execTime,
                                int iters = 100) {  
-  //Setup first GeMM
-  typename GemmTy1::Arguments args1{handle1.prod(),
-                                    attnParams.gemm_size1,
-                                    attnParams.x   .device_ref(),
-                                    attnParams.qkv .device_ref(),
-                                    attnParams.xqkv.device_ref(),
-                                    attnParams.xqkv.device_ref(),
-                                    {attnParams.alpha, attnParams.beta},
-                                    split_k1};
-  size_t workspace_size = GemmTy1::get_workspace_size(args1);
+  printf("split_k1 %d, split_k2 %d, split_k3 %d, split_k4 %d\n", split_k1, split_k2, split_k3, split_k4);
+  //Setup XQKV = X * QKV GeMM
+  typename XQKVCuSyncGemmTy::Arguments args1{xqkvstage,
+                                            attnParams.gemm_size_xqkv,
+                                            attnParams.x.device_ref(),
+                                            attnParams.qkv.device_ref(),
+                                            attnParams.xqkv.device_ref(),
+                                            attnParams.xqkv.device_ref(),
+                                            {attnParams.alpha, attnParams.beta},
+                                            split_k1};
+  size_t workspace_size = XQKVCuSyncGemmTy::get_workspace_size(args1);
   cutlass::device_memory::allocation<uint8_t> workspace1(workspace_size);
-  GemmTy1 gemm_op1;
+  XQKVCuSyncGemmTy gemm_op1;
   cutlass::Status status;
   status = gemm_op1.can_implement(args1);
   CUTLASS_CHECK(status);
   status = gemm_op1.initialize(args1, workspace1.get());
   CUTLASS_CHECK(status);
 
-  //Setup second GeMM
-  typename GemmTy2::Arguments args2{handle2.cons(),
-                                    attnParams.gemm_size2,
-                                    attnParams.xdot.device_ref(),
-                                    attnParams.w2  .device_ref(),
-                                    attnParams.xw12.device_ref(),
-                                    attnParams.xw12.device_ref(),
+  size_t N = attnParams.gemm_size_xqkv.n()/3;
+  ElementOutput* device_xq = attnParams.xqkv.device_data() + 0;
+  cutlass::TensorRef xq{device_xq, LayoutInputA(3*N)}; 
+  ElementOutput* device_xk = attnParams.xqkv.device_data() + N;
+  cutlass::TensorRef xk{device_xk, LayoutK(3*N)};
+
+  //Setup S = Q * K.T GeMM
+  typename SCuSyncGemmTy::Arguments args2{scustage,
+                                    attnParams.gemm_size_s,
+                                    xq, xk,
+                                    attnParams.s.device_ref(),
+                                    attnParams.s.device_ref(),
                                     {attnParams.alpha, attnParams.beta},
                                     split_k2};
-  workspace_size = GemmTy2::get_workspace_size(args2);
+  workspace_size = SCuSyncGemmTy::get_workspace_size(args2);
   cutlass::device_memory::allocation<uint8_t> workspace2(workspace_size);
-  GemmTy2 gemm_op2;
+  SCuSyncGemmTy gemm_op2;
   status = gemm_op2.can_implement(args2);
   CUTLASS_CHECK(status);
   status = gemm_op2.initialize(args2, workspace2.get());
   CUTLASS_CHECK(status);
   
+  ElementOutput* device_xv = attnParams.xqkv.device_data() + N;
+  cutlass::TensorRef xv{device_xv, LayoutInputB(3*N)};
+
+  //Setup O=S*V GeMM
+  typename OCuSyncGemmTy::Arguments args3{ocustage,
+                                    attnParams.gemm_size_o,
+                                    attnParams.s.device_ref(),
+                                    xv,
+                                    attnParams.o.device_ref(),
+                                    attnParams.o.device_ref(),
+                                    {attnParams.alpha, attnParams.beta},
+                                    split_k3};
+  workspace_size = OCuSyncGemmTy::get_workspace_size(args3);
+  cutlass::device_memory::allocation<uint8_t> workspace3(workspace_size);
+  OCuSyncGemmTy gemm_op3;
+  status = gemm_op3.can_implement(args3);
+  CUTLASS_CHECK(status);
+  status = gemm_op3.initialize(args3, workspace3.get());
+  CUTLASS_CHECK(status);
+
+  //Setup XW12=O*W12 GeMM
+  typename XW12CuSyncGemmTy::Arguments args4{xw12custage,
+                                    attnParams.gemm_size_xw12,
+                                    attnParams.o.device_ref(),
+                                    attnParams.w2.device_ref(),
+                                    attnParams.xw12.device_ref(),
+                                    attnParams.xw12.device_ref(),
+                                    {attnParams.alpha, attnParams.beta},
+                                    split_k4};
+  workspace_size = XW12CuSyncGemmTy::get_workspace_size(args4);
+  cutlass::device_memory::allocation<uint8_t> workspace4(workspace_size);
+  XW12CuSyncGemmTy gemm_op4;
+  status = gemm_op4.can_implement(args4);
+  CUTLASS_CHECK(status);
+  status = gemm_op4.initialize(args4, workspace4.get());
+  CUTLASS_CHECK(status);
+
   execTime = 0;
   
   //Run Kernels in Self-Attention
   for (int r = 0; r < iters; r++) {
-    handle1.prod().iter += 1;
-    handle1.cons().iter += 1;
-    handle2.prod().iter += 1;
-    handle2.cons().iter += 1;
-    gemm_op1.params_.custage.iter += 1;
-    gemm_op2.params_.custage.iter += 1;
-
     double start = timeInMicroSeconds();
     status = gemm_op1.run(true, NULL, streams[0]);
     CUTLASS_CHECK(status);
-    
-#ifndef AVOID_WAIT_KERNEL
-    handle1.invokeWaitKernel(streams[1]);
-#endif
-    selfAttnDotProdSoftmaxDropout<SoftmaxThreads, half, float, 
-                                  ShapeMMAThreadBlock::kM, ShapeMMAThreadBlock::kN, 
-                                  SoftmaxRowTile, true>
-                                <<<DIVUP(attnParams.gemm_size1.m(), SoftmaxRowTile), 
-                                   SoftmaxThreads, attnParams.gemm_size1.n()/3 * sizeof(half), 
-                                   streams[1]>>>
-                                (attnParams.gemm_size1.m(), 
-                                 attnParams.gemm_size1.n()/3,
-                                 (half*)attnParams.xqkv.device_data(),
-                                 (half*)attnParams.xdot.device_data(),
-                                 1.0f,
-                                 attnParams.randStates,
-                                 handle1.cons(), handle2.prod());
 
-                                 // CUDA_CHECK(cudaDeviceSynchronize());
-#ifndef AVOID_WAIT_KERNEL    
-    handle2.invokeWaitKernel(streams[2]);
-#endif
+    xqkvstage.invokeWaitKernel(streams[1]);
+    status = gemm_op2.run(true, NULL, streams[1]);
+    CUTLASS_CHECK(status);
     
-    status = gemm_op2.run(true, NULL, streams[2]);
+    scustage.invokeWaitKernel(streams[2]);
+    status = gemm_op3.run(true, NULL, streams[2]);
+    CUTLASS_CHECK(status);
+
+    ocustage.invokeWaitKernel(streams[3]);
+    status = gemm_op4.run(true, NULL, streams[3]);
     CUTLASS_CHECK(status);
 
     if (status != cutlass::Status::kSuccess) {
@@ -747,36 +783,29 @@ cudaError_t runAttentionCuSync(int split_k1, int split_k2,
   return cudaSuccess;
 }
 
-template<typename GemmTy1, typename GemmTy2, typename GemmSplitKTy1, typename GemmSplitKTy2>
-cudaError_t runAttentionCuSync(int split_k1, int split_k2,
+cudaError_t runAttentionCuSync(int split_k1, int split_k2, int split_k3, int split_k4,
                                AttentionParams& attnParams,
-                               CuSyncImpl1& handle1,
-                               CuSyncImpl2& handle2,
+                               XQKVCuStage& xqkvstage, SCuStage& scustage, OCuStage& ocustage, XW12CuStage& xw12custage,
                                cudaStream_t streams[],
                                double& execTime,
                                int iters = 100) {
   cudaError_t result;
-  if (split_k1 == 1 && split_k2 == 1) {
-    result = runAttentionCuSync<GemmTy1, GemmTy2>(split_k1, split_k2, attnParams, 
-                                                  handle1, handle2, streams, execTime, 
-                                                  iters);
-  } else if (split_k1 == 1 && split_k2 > 1) {
-    result = runAttentionCuSync<GemmTy1, GemmSplitKTy2>(split_k1, split_k2, attnParams, 
-                                                        handle1, handle2, streams, execTime, 
-                                                        iters);
-  } else if (split_k1 > 1 && split_k2 == 1) {
-    result = runAttentionCuSync<GemmSplitKTy1, GemmTy2>(split_k1, split_k2, attnParams, 
-                                                        handle1, handle2, streams, execTime, 
-                                                        iters);
-  } else if (split_k1 > 1 && split_k2 > 1) {
-    result = runAttentionCuSync<GemmSplitKTy1, GemmSplitKTy2>(split_k1, split_k2, attnParams, 
-                                                              handle1, handle2, streams, 
-                                                              execTime, iters);
+  if (split_k1 == 1 && split_k4 == 1) {
+    result = runAttentionCuSync<XQKVCuSyncGemm, SCuSyncGemmSplitK, OCuSyncGemmSplitK, XW12CuSyncGemm>(split_k1, split_k2, split_k3, split_k4, attnParams, 
+                                              xqkvstage, scustage, ocustage, xw12custage, streams, execTime, iters);
+  } else if (split_k1 == 1 && split_k4 > 1) {
+    result = runAttentionCuSync<XQKVCuSyncGemm, SCuSyncGemmSplitK, OCuSyncGemmSplitK, XW12CuSyncGemmSplitK>(split_k1, split_k2, split_k3, split_k4, attnParams, 
+                                              xqkvstage, scustage, ocustage, xw12custage, streams, execTime, iters);
+  } else if (split_k1 > 1 && split_k4 == 1) {
+    result = runAttentionCuSync<XQKVCuSyncGemmSplitK, SCuSyncGemmSplitK, OCuSyncGemmSplitK, XW12CuSyncGemm>(split_k1, split_k2, split_k3, split_k4, attnParams, 
+                                              xqkvstage, scustage, ocustage, xw12custage, streams, execTime, iters);
+  } else if (split_k1 > 1 && split_k4 > 1) {
+    result = runAttentionCuSync<XQKVCuSyncGemmSplitK, SCuSyncGemmSplitK, OCuSyncGemmSplitK, XW12CuSyncGemmSplitK>(split_k1, split_k2, split_k3, split_k4, attnParams, 
+                                              xqkvstage, scustage, ocustage, xw12custage, streams, execTime, iters);
   }
 
   return result;
 }
-#endif
 
 int run(int argc, char* argv[]) {
   cudaDeviceProp props;
@@ -794,10 +823,11 @@ int run(int argc, char* argv[]) {
     // Return 0 so tests are considered passing if run on unsupported architectures or CUDA Toolkits.
     return 0;
   }
-  const uint NUM_ARGS = 5;
-  std::string argNames[NUM_ARGS] = {"--model", "--batch", "--check", "--split-k1", "--split-k2"};
+  const uint NUM_ARGS = 7;
+  std::string argNames[NUM_ARGS] = {"--model", "--batch", "--check", "--split-k1", "--split-k2", "--split-k3", "--split-k4"};
   std::string argHelp[NUM_ARGS] = {"GPT-3 or LLaMa", "Batch size", "Check results", 
-                                   "Split K for first GeMM", "Split K for second GeMM"};
+                                   "Split K for XQKV = X*QKV GeMM", "Split K for P=Q*K.T GeMM",
+                                   "Split K for O=P*V GeMM", "Split K for XW12=O*W12 GeMM"};
   
   if (argc < NUM_ARGS+1) {
     std::cout << "usage: " << std::endl
@@ -805,7 +835,9 @@ int run(int argc, char* argv[]) {
               << argNames[1] << " <int>" << argHelp[1] << std::endl
               << argNames[2] << " true|false" << argHelp[2] << std::endl
               << argNames[3] << " <int> " << argHelp[3] << std::endl
-              << argNames[4] << " <int> " << argHelp[4] << std::endl;
+              << argNames[4] << " <int> " << argHelp[4] << std::endl
+              << argNames[5] << " <int> " << argHelp[5] << std::endl
+              << argNames[6] << " <int> " << argHelp[6] << std::endl;
     return 0;
   }
 
@@ -814,6 +846,8 @@ int run(int argc, char* argv[]) {
   bool doChecking = false;
   uint split_k1 = 1;
   uint split_k2 = 1;
+  uint split_k3 = 1;
+  uint split_k4 = 1;
 
   for (int i = 1; i < argc; ++i) {
     std::string arg = std::string(argv[i]);
@@ -839,6 +873,12 @@ int run(int argc, char* argv[]) {
       i=i+1;
     } else if (arg.find(argNames[4]) == 0) {
       split_k2 = atoi(argv[i+1]);
+      i=i+1;
+    } else if (arg.find(argNames[5]) == 0) {
+      split_k3 = atoi(argv[i+1]);
+      i=i+1;
+    } else if (arg.find(argNames[6]) == 0) {
+      split_k4 = atoi(argv[i+1]);
       i=i+1;
     }
   }
@@ -900,15 +940,16 @@ int run(int argc, char* argv[]) {
   double matmul4Time = 0;
 
   if (true) {
-    result = runAttentionBaseline<Gemm1, BColumnMajorGemm1, GemmSplitK1, BColumnMajorGemmSplitK1>(split_k1, split_k2, attnParams, streams, baselineTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, 1);
-
+    printf("948\n");
+    result = runAttentionBaseline(split_k1, split_k2, split_k3, split_k4, attnParams, streams, baselineTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, 1);
+    printf("950\n");
     CUDA_CHECK(cudaDeviceSynchronize());
     if (doChecking) {
       result = check_results(attnParams);
       CUDA_CHECK(result);
     }
 
-    result = runAttentionBaseline<Gemm1, BColumnMajorGemm1, GemmSplitK1, BColumnMajorGemmSplitK1>(split_k1, split_k2, attnParams, streams, baselineTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, warmup);
+    result = runAttentionBaseline(split_k1, split_k2, split_k3, split_k4, attnParams, streams, baselineTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, warmup);
 
     CUDA_CHECK(cudaDeviceSynchronize());
     matmul1Time = 0;
@@ -916,30 +957,35 @@ int run(int argc, char* argv[]) {
     matmul3Time = 0;
     matmul4Time = 0;
     printf("START-BASELINE:\n");
-    result = runAttentionBaseline<Gemm1, BColumnMajorGemm1, GemmSplitK1, BColumnMajorGemmSplitK1>(split_k1, split_k2, attnParams, streams, baselineTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, epochs);
+    result = runAttentionBaseline(split_k1, split_k2, split_k3, split_k4, attnParams, streams, baselineTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, epochs);
 
     CUDA_CHECK(result);
   
     printf("END-BASELINE: {\"Total\": %lf, \"matmul1Time\": %lf, \"matmul2Time\": %lf, \"matmul3Time\": %lf, \"matmul4Time\": %lf} microseconds\n", baselineTime/(float)epochs, matmul1Time/(float)epochs, matmul2Time/(float)epochs, matmul3Time/(float)epochs, matmul4Time/(float)epochs);
   }
   
-  #if 0
   attnParams.initOuts();
 
-  dim3 gridDim1 = {(uint)DIVUP(attnParams.gemm_size1.m(), ShapeMMAThreadBlock::kM),
-                   (uint)DIVUP(attnParams.gemm_size1.n(), ShapeMMAThreadBlock::kN),
+  dim3 gridDim1 = {(uint)DIVUP(attnParams.gemm_size_xqkv.m(), ShapeMMAThreadBlock::kM),
+                   (uint)DIVUP(attnParams.gemm_size_xqkv.n(), ShapeMMAThreadBlock::kN),
                    split_k1};
-  dim3 gridDim2 = {(uint)DIVUP(attnParams.gemm_size1.m(), SoftmaxRowTile), 1, 1};
-  dim3 gridDim3 = {(uint)DIVUP(attnParams.gemm_size2.m(), ShapeMMAThreadBlock::kM), 
-                   (uint)DIVUP(attnParams.gemm_size2.n(), ShapeMMAThreadBlock::kN),
+  dim3 gridDim2 = {(uint)DIVUP(attnParams.gemm_size_s.m(), ShapeMMAThreadBlock::kM),
+                   (uint)DIVUP(attnParams.gemm_size_s.n(), ShapeMMAThreadBlock::kN),
+                   split_k1};
+  dim3 gridDim3 = {(uint)DIVUP(attnParams.gemm_size_o.m(), ShapeMMAThreadBlock::kM), 
+                   (uint)DIVUP(attnParams.gemm_size_o.n(), ShapeMMAThreadBlock::kN),
+                   split_k2};
+  dim3 gridDim4 = {(uint)DIVUP(attnParams.gemm_size_xw12.m(), ShapeMMAThreadBlock::kM), 
+                   (uint)DIVUP(attnParams.gemm_size_xw12.n(), ShapeMMAThreadBlock::kN),
                    split_k2};
   dim3 tileSize = {ShapeMMAThreadBlock::kM, ShapeMMAThreadBlock::kN, 1};
-  
+
 #ifdef ROWSYNC
   using Sync1 = RowSync;
   RowSync sync1(gridDim1.y);
-  using Sync2 = RowSync;
-  Sync2 sync2(min(ShapeMMAThreadBlock::kM, attnParams.gemm_size1.m()), SoftmaxRowTile); 
+  RowSync sync2(gridDim2.y);
+  RowSync sync3(gridDim3.y);
+  RowSync sync4(gridDim4.y);
 #elif defined(TILESYNC)
   using Sync1 = TileSync<1>;
   using Sync2 = Sync1;
@@ -953,24 +999,21 @@ int run(int argc, char* argv[]) {
 #else
   #error "Unknown Policy"
 #endif
-
-  ProdCuStage prod1(gridDim1, tileSize, sync1);
-  MiddleCuStage cons1(gridDim2, {SoftmaxRowTile, 1, 1}, sync1);
-  ConsCuStage cons2(gridDim3, tileSize, sync2);
-
-  CuSyncImpl1 handle1(prod1, cons1);
-  CuSyncImpl2 handle2(cons1, cons2);
-  handle2.iter = 0;
-  handle1.iter = 0;
-  handle1.prod().iter = handle1.cons().iter = 0;
-  handle2.prod().iter = handle2.cons().iter = 0;
   
+  XQKVCuStage xqkvStage(gridDim1, tileSize, NoSync(), sync1);
+  SCuStage    sStage   (gridDim2, tileSize, sync1, sync2);
+  OCuStage    oStage   (gridDim3, tileSize, sync2, sync3);
+  XW12CuStage xw12Stage(gridDim4, tileSize, sync3, NoSync());
+  
+  CuSync::setProducerConsumerPair(xqkvStage, sStage);
+  CuSync::setProducerConsumerPair(sStage, oStage);
+  CuSync::setProducerConsumerPair(oStage, xw12Stage);
+
   double overlapTime = 0;
   matmul1Time = 0;
-  softmaxTime = 0;
   matmul2Time = 0;
   if (true) {
-    result = runAttentionCuSync<CuSyncGemm1, CuSyncGemm2, CuSyncGemmSplitK1, CuSyncGemmSplitK2>(split_k1, split_k2, attnParams, handle1, handle2, streams, overlapTime, 1);
+    result = runAttentionCuSync(split_k1, split_k2, split_k3, split_k4, attnParams, xqkvStage, sStage, oStage, xw12Stage, streams, overlapTime, 1);
 
     CUDA_CHECK(cudaDeviceSynchronize());
     if (doChecking) {
@@ -979,15 +1022,15 @@ int run(int argc, char* argv[]) {
         return 1;
       }
     }
-    //warmup
-    result = runAttentionCuSync<CuSyncGemm1, CuSyncGemm2, CuSyncGemmSplitK1, CuSyncGemmSplitK2>(split_k1, split_k2, attnParams, handle1, handle2, streams, overlapTime, warmup);
+    // //warmup
+    result = runAttentionCuSync(split_k1, split_k2, split_k3, split_k4, attnParams, xqkvStage, sStage, oStage, xw12Stage, streams, overlapTime, warmup);
 
     CUDA_CHECK(cudaDeviceSynchronize());
-    printf("START-OVERLAPPED\n");
-    result = runAttentionCuSync<CuSyncGemm1, CuSyncGemm2, CuSyncGemmSplitK1, CuSyncGemmSplitK2>(split_k1, split_k2, attnParams, handle1, handle2, streams, overlapTime, epochs);
+    // printf("START-OVERLAPPED\n");
+    result = runAttentionCuSync(split_k1, split_k2, split_k3, split_k4, attnParams, xqkvStage, sStage, oStage, xw12Stage, streams, overlapTime, epochs);
     
     printf("END-OVERLAPPED: {\"Total\": %lf} microseconds\n", overlapTime/(float)epochs);
   }
-  #endif
+
   return 0;
 }
