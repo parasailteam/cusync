@@ -157,8 +157,6 @@ using Gemm1 = BaseMLPGemm<false>;
 using Gemm2 = BaseMLPGemm<false>;
 using LayoutK = cutlass::layout::ColumnMajor;
 
-// using LayoutK = cutlass::layout::RowMajor;
-
 template<bool splitK>
 class BColumnMajorGemm : public cutlass::gemm::device::Gemm<ElementInputA, LayoutInputA, 
                                                      ElementInputB, LayoutK,
@@ -172,6 +170,7 @@ class BColumnMajorGemm : public cutlass::gemm::device::Gemm<ElementInputA, Layou
 
 // Baseline GeMMs
 using BColumnMajorGemm1 = BColumnMajorGemm<false>;
+using BColumnMajorGemmSplitK1 = BColumnMajorGemm<true>;
 
 //Baseline GeMMs with SplitK enabled
 using GemmSplitK1 = BaseMLPGemm<true>;
@@ -413,24 +412,23 @@ cudaError_t host_attention(AttentionParams& attnParams) {
         result += host_xq * host_xk;
         r1 += host_xq * host_xk;
       }
-      if (i == 0 and j == 0) printf("415: %f\n", (float)r1);
       host_s[i * B + j] = (ElementOutput)result;
     }
   }
 
-  ElementOutput* host_p = new ElementOutput[B * B];
+  ElementOutput* host_p = host_s; //new ElementOutput[B * B];
 
-  for (size_t i = 0; i < B; i++) {
-    float sum = 0.0f;
-    for (size_t j = 0; j < B; j++) {
-      sum += exp((float)host_s[i*B + j]);
-    }
+  // for (size_t i = 0; i < B; i++) {
+  //   float sum = 0.0f;
+  //   for (size_t j = 0; j < B; j++) {
+  //     sum += exp((float)host_s[i*B + j]);
+  //   }
     
-    for (size_t j = 0; j < B; j++) {
-      //Assume dropout probability is 1.0
-      host_p[i*B + j] = exp(host_s[i*B + j])/sum;
-    }
-  }
+  //   for (size_t j = 0; j < B; j++) {
+  //     //Assume dropout probability is 1.0
+  //     host_p[i*B + j] = exp(host_s[i*B + j])/sum;
+  //   }
+  // }
   
   ElementOutput* host_o = attnParams.ref_o.host_data();
   
@@ -465,11 +463,20 @@ cudaError_t check_results(AttentionParams& attnParams) {
     printf("not correct\n");
     return cudaErrorUnknown;
   }
-  printf("465: %f\n", (float)attnParams.xqkv.host_data()[0]);
+  
   attnParams.s.sync_host();
   printf("Checking S=Q*K.T\n");
   eq = equals(attnParams.ref_s.size(), attnParams.ref_s.host_data(),
               attnParams.s.host_data(), 1e-1f);
+  if (eq == false) {
+    printf("not correct\n");
+    return cudaErrorUnknown;
+  }
+
+  attnParams.o.sync_host();
+  printf("Checking O=S*V\n");
+  eq = equals(attnParams.ref_o.size(), attnParams.ref_o.host_data(),
+              attnParams.o.host_data(), 1e-1f);
   if (eq == false) {
     printf("not correct\n");
     return cudaErrorUnknown;
@@ -493,8 +500,9 @@ cudaError_t runAttentionBaseline(int split_k1, int split_k2,
                                  cudaStream_t streams[],
                                  double& execTime,
                                  double& matmul1Time,
-                                 double& softmaxTime,
                                  double& matmul2Time,
+                                 double& matmul3Time,
+                                 double& matmul4Time,
                                  int iters = 100) {  
   // ElementOutput* device_xqkv = tensor_xqkv.device_data();
   cutlass::Status status;
@@ -523,15 +531,15 @@ cudaError_t runAttentionBaseline(int split_k1, int split_k2,
   cutlass::TensorRef xk{device_xk, LayoutK(3*N)};
 
   //Setup S=Q*K.T GeMM
-  typename BColumnMajorGemm1::Arguments args2{attnParams.gemm_size_s,
-                                              xq, xk,
-                                              attnParams.s.device_ref(),
-                                              attnParams.s.device_ref(),
-                                              {attnParams.alpha, attnParams.beta},
-                                              split_k2};
-  workspace_size = BColumnMajorGemm1::get_workspace_size(args2);
+  typename GemmTy2::Arguments args2{attnParams.gemm_size_s,
+                                    xq, xk,
+                                    attnParams.s.device_ref(),
+                                    attnParams.s.device_ref(),
+                                    {attnParams.alpha, attnParams.beta},
+                                    split_k2};
+  workspace_size = GemmTy2::get_workspace_size(args2);
   cutlass::device_memory::allocation<uint8_t> workspace2(workspace_size);
-  BColumnMajorGemm1 gemm_op2;
+  GemmTy2 gemm_op2;
   status = gemm_op2.can_implement(args2);
   CUTLASS_CHECK(status);
   status = gemm_op2.initialize(args2, workspace2.get());
@@ -542,12 +550,12 @@ cudaError_t runAttentionBaseline(int split_k1, int split_k2,
 
   //Setup O=S*V GeMM
   typename GemmTy1::Arguments args3{attnParams.gemm_size_o,
-                                             attnParams.s.device_ref(),
-                                             xv,
-                                             attnParams.o.device_ref(),
-                                             attnParams.o.device_ref(),
-                                             {attnParams.alpha, attnParams.beta},
-                                             split_k2};
+                                    attnParams.s.device_ref(),
+                                    xv,
+                                    attnParams.o.device_ref(),
+                                    attnParams.o.device_ref(),
+                                    {attnParams.alpha, attnParams.beta},
+                                    split_k2};
   workspace_size = GemmTy1::get_workspace_size(args3);
   cutlass::device_memory::allocation<uint8_t> workspace3(workspace_size);
   GemmTy1 gemm_op3;
@@ -557,16 +565,16 @@ cudaError_t runAttentionBaseline(int split_k1, int split_k2,
   CUTLASS_CHECK(status);
 
   //Setup XW12=O*W12 GeMM
-  typename GemmTy2::Arguments args4{attnParams.gemm_size_xw12,
+  typename GemmTy1::Arguments args4{attnParams.gemm_size_xw12,
                                     attnParams.o.device_ref(),
                                     attnParams.w2.device_ref(),
                                     attnParams.xw12.device_ref(),
                                     attnParams.xw12.device_ref(),
                                     {attnParams.alpha, attnParams.beta},
                                     split_k2};
-  workspace_size = GemmTy2::get_workspace_size(args4);
+  workspace_size = GemmTy1::get_workspace_size(args4);
   cutlass::device_memory::allocation<uint8_t> workspace4(workspace_size);
-  GemmTy2 gemm_op4;
+  GemmTy1 gemm_op4;
   status = gemm_op4.can_implement(args4);
   CUTLASS_CHECK(status);
   status = gemm_op4.initialize(args4, workspace4.get());
@@ -584,28 +592,31 @@ cudaError_t runAttentionBaseline(int split_k1, int split_k2,
     double iterMatMul1 = middle1-start;
     matmul1Time += iterMatMul1;
     
-    double middle2 = timeInMicroSeconds();
-    double iterSoftmax = middle2-middle1;
-    softmaxTime += iterSoftmax;
     status = gemm_op2(streams[0]);
-    // CUTLASS_CHECK(status);
+    CUTLASS_CHECK(status);
     CUDA_CHECK(cudaDeviceSynchronize());
-
+    double middle2 = timeInMicroSeconds();
+    double iterMatmul2 = middle2-middle1;
+    matmul2Time += iterMatmul2;
+    
     status = gemm_op3(streams[0]);
-    // CUTLASS_CHECK(status);
+    CUTLASS_CHECK(status);
     CUDA_CHECK(cudaDeviceSynchronize());
+    double middle3 = timeInMicroSeconds();
+    double iterMatmul3 = middle3-middle2;
+    matmul3Time += iterMatmul3;
 
     status = gemm_op4(streams[0]);
-    // CUTLASS_CHECK(status);
+    CUTLASS_CHECK(status);
     CUDA_CHECK(cudaDeviceSynchronize());
-
-    double middle3 = timeInMicroSeconds();
-    double iterMatmul2 = middle3-middle2;
-    matmul2Time += iterMatmul2;
+    double middle4 = timeInMicroSeconds();
+    double iterMatmul4 = middle4-middle3;
+    matmul4Time += iterMatmul4;
+  
     double end = timeInMicroSeconds();
     if (iters > 10)
-      printf("{\"Total\": %lf, \"matmul1Time\": %lf, \"softmaxTime\": %lf, \"matmul2Time\": %lf}\n",
-             end-start, iterMatMul1, iterSoftmax, iterMatmul2);
+      printf("{\"Total\": %lf, \"matmul1Time\": %lf, \"matmul2Time\": %lf, \"matmul3Time\": %lf, \"matmul4Time\": %lf}\n",
+             end-start, iterMatMul1, iterMatmul2, iterMatmul3, iterMatmul4);
     execTime += end-start;
   }
 
@@ -618,18 +629,19 @@ cudaError_t runAttentionBaseline(int split_k1, int split_k2,
                                  cudaStream_t streams[],
                                  double& execTime,
                                  double& matmul1Time,
-                                 double& softmaxTime,
                                  double& matmul2Time,
+                                 double& matmul3Time,
+                                 double& matmul4Time,
                                  int iters = 100) {
   cudaError_t result;
   if (split_k1 == 1 && split_k2 == 1) {
-    result = runAttentionBaseline<GemmTy1, GemmTy2>(split_k1, split_k2, attnParams, streams, execTime, matmul1Time, softmaxTime, matmul2Time, iters);
+    result = runAttentionBaseline<GemmTy1, GemmTy2>(split_k1, split_k2, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
   } else if (split_k1 > 1 && split_k2 == 1) {
-    result = runAttentionBaseline<GemmSplitKTy1, GemmTy1>(split_k1, split_k2, attnParams, streams, execTime, matmul1Time, softmaxTime, matmul2Time, iters);
+    result = runAttentionBaseline<GemmSplitKTy1, GemmTy2>(split_k1, split_k2, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
   } else if (split_k1 == 1 && split_k2 > 1) {
-    result = runAttentionBaseline<GemmTy1, GemmSplitKTy2>(split_k1, split_k2, attnParams, streams, execTime, matmul1Time, softmaxTime, matmul2Time, iters);
+    result = runAttentionBaseline<GemmTy1, GemmSplitKTy2>(split_k1, split_k2, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
   } else if (split_k1 > 1 && split_k2 > 1) {
-    result = runAttentionBaseline<GemmSplitKTy1, GemmSplitKTy2>(split_k1, split_k2, attnParams, streams, execTime, matmul1Time, softmaxTime, matmul2Time, iters);
+    result = runAttentionBaseline<GemmSplitKTy1, GemmSplitKTy2>(split_k1, split_k2, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
   }
 
   return result;
@@ -883,12 +895,12 @@ int run(int argc, char* argv[]) {
   
   double baselineTime = 0;
   double matmul1Time = 0;
-  double softmaxTime = 0;
   double matmul2Time = 0;
-  #define ENABLE_NORMAL_GEMM
+  double matmul3Time = 0;
+  double matmul4Time = 0;
 
   if (true) {
-    result = runAttentionBaseline<Gemm1, Gemm2, GemmSplitK1, GemmSplitK2>(split_k1, split_k2, attnParams, streams, baselineTime, matmul1Time, softmaxTime, matmul2Time, 1);
+    result = runAttentionBaseline<Gemm1, BColumnMajorGemm1, GemmSplitK1, BColumnMajorGemmSplitK1>(split_k1, split_k2, attnParams, streams, baselineTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, 1);
 
     CUDA_CHECK(cudaDeviceSynchronize());
     if (doChecking) {
@@ -896,18 +908,19 @@ int run(int argc, char* argv[]) {
       CUDA_CHECK(result);
     }
 
-    result = runAttentionBaseline<Gemm1, Gemm2, GemmSplitK1, GemmSplitK2>(split_k1, split_k2, attnParams, streams, baselineTime, matmul1Time, softmaxTime, matmul2Time, warmup);
+    result = runAttentionBaseline<Gemm1, BColumnMajorGemm1, GemmSplitK1, BColumnMajorGemmSplitK1>(split_k1, split_k2, attnParams, streams, baselineTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, warmup);
 
     CUDA_CHECK(cudaDeviceSynchronize());
     matmul1Time = 0;
-    softmaxTime = 0;
     matmul2Time = 0;
+    matmul3Time = 0;
+    matmul4Time = 0;
     printf("START-BASELINE:\n");
-    result = runAttentionBaseline<Gemm1, Gemm2, GemmSplitK1, GemmSplitK2>(split_k1, split_k2, attnParams, streams, baselineTime, matmul1Time, softmaxTime, matmul2Time, epochs);
+    result = runAttentionBaseline<Gemm1, BColumnMajorGemm1, GemmSplitK1, BColumnMajorGemmSplitK1>(split_k1, split_k2, attnParams, streams, baselineTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, epochs);
 
     CUDA_CHECK(result);
   
-    printf("END-BASELINE: {\"Total\": %lf, \"matmul1Time\": %lf, \"softmaxTime\": %lf, \"matmul2Time\": %lf} microseconds\n", baselineTime/(float)epochs, matmul1Time/(float)epochs, softmaxTime/(float)epochs, matmul2Time/(float)epochs);
+    printf("END-BASELINE: {\"Total\": %lf, \"matmul1Time\": %lf, \"matmul2Time\": %lf, \"matmul3Time\": %lf, \"matmul4Time\": %lf} microseconds\n", baselineTime/(float)epochs, matmul1Time/(float)epochs, matmul2Time/(float)epochs, matmul3Time/(float)epochs, matmul4Time/(float)epochs);
   }
   
   #if 0
