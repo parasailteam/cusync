@@ -149,7 +149,7 @@ class BaseMLPGemm : public cutlass::gemm::device::Gemm<ElementInputA, LayoutInpu
                                                         SmArch, ShapeMMAThreadBlock,
                                                         ShapeMMAWarp, ShapeMMAOp,
                                                         EpilogueOp, 
-                                                        cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>, 
+                                                        cutlass::gemm::threadblock::CuSyncGemmHorizontalThreadblockSwizzle, 
                                                         2, 8, 8, splitK> {};
 
 // Baseline GeMMs
@@ -165,7 +165,7 @@ class BColumnMajorGemm : public cutlass::gemm::device::Gemm<ElementInputA, Layou
                                                      SmArch, ShapeMMAThreadBlock,
                                                      ShapeMMAWarp, ShapeMMAOp,
                                                      EpilogueOp, 
-                                                     cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>, 
+                                                     cutlass::gemm::threadblock::CuSyncGemmHorizontalThreadblockSwizzle, 
                                                      2, 8, 8, splitK> {};
 
 // Baseline GeMMs
@@ -647,8 +647,6 @@ cudaError_t runAttentionBaseline(int split_k1, int split_k2, int split_k3, int s
                                  double& matmul4Time,
                                  int iters = 100) {
   cudaError_t result;
-  printf("652: split_k1 %d split_k2 %d split_k3 %d split_k4 %d\n", split_k1, split_k2, split_k3, split_k4);
-
   if (split_k1 == 1 && split_k4 == 1) {
     result = runAttentionBaseline<Gemm1, BColumnMajorGemmSplitK1, GemmSplitK1, Gemm1>(split_k1, split_k2, split_k3, split_k4, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
   } else if (split_k1 > 1 && split_k4 == 1) {
@@ -885,8 +883,8 @@ int run(int argc, char* argv[]) {
     std::cout<<"invalid model or batch" <<std::endl;
     return 0;
   }
-    
-  std::cout << "model=" << model << " batch=" << batch << "check="<<doChecking <<std::endl;
+  
+  std::cout << "model=" << model << " batch=" << batch << " check="<<doChecking <<std::endl;
   int problem[4] = {0,0,0,0};
   problem[0] = batch;
   
@@ -938,9 +936,7 @@ int run(int argc, char* argv[]) {
   double matmul4Time = 0;
 
   if (true) {
-    printf("948\n");
     result = runAttentionBaseline(split_k1, split_k2, split_k3, split_k4, attnParams, streams, baselineTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, 1);
-    printf("950\n");
     CUDA_CHECK(cudaDeviceSynchronize());
     if (doChecking) {
       result = check_results(attnParams);
@@ -1020,7 +1016,7 @@ int run(int argc, char* argv[]) {
     result = runAttentionCuSync(split_k1, split_k2, split_k3, split_k4, attnParams, xqkvStage, sStage, oStage, xw12Stage, streams, overlapTime, warmup);
 
     CUDA_CHECK(cudaDeviceSynchronize());
-    // printf("START-OVERLAPPED\n");
+    printf("START-OVERLAPPED\n");
     result = runAttentionCuSync(split_k1, split_k2, split_k3, split_k4, attnParams, xqkvStage, sStage, oStage, xw12Stage, streams, overlapTime, epochs);
     
     printf("END-OVERLAPPED: {\"Total\": %lf} microseconds\n", overlapTime/(float)epochs);

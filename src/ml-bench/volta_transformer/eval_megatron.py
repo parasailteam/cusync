@@ -523,36 +523,36 @@ elif model == "llama" and attention_or_mlp == "attention":
   tiles = {
     2048: {
       "TileSizes" : [256, 128, 32, 128, 64, 32], "MaxTBsPerSM": 2, "Best-Policy": "Row-Sync",
-      "baseline": {"split_ks": [2,2], "SoftmaxRowTile" : 1},
-      "tilesync":   {"split_ks": [2,1], "SoftmaxRowTile" : 1,
+      "baseline": {"split_ks":   [4,1,1,1], "SoftmaxRowTile" : 1},
+      "tilesync":   {"split_ks": [1,1,1,1], "SoftmaxRowTile" : 1,
       "AvoidCustomOrder": False,
       "AvoidWaitKernel": False,
       "ReorderTileLoads": True},
-      "rowsync":   {"split_ks": [2,1], "SoftmaxRowTile" : 1},
+      "rowsync":   {"split_ks":  [1,1,1,1], "SoftmaxRowTile" : 1},
     },
     1024: {"TileSizes" : [256, 128, 32, 128, 64, 32], "MaxTBsPerSM": 2, "Best-Policy": "Row-Sync",
-      "baseline": {"split_ks": [2,2], "SoftmaxRowTile" : 1},
-      "tilesync":   {"split_ks": [2,1], "SoftmaxRowTile" : 1,
+      "baseline": {"split_ks":  [6,2,1,1], "SoftmaxRowTile" : 1},
+      "tilesync":   {"split_ks": [4,2,1,1], "SoftmaxRowTile" : 1,
       "AvoidCustomOrder": False,
       "AvoidWaitKernel": False,
       "ReorderTileLoads": True},
-      "rowsync":   {"split_ks": [2,1], "SoftmaxRowTile" : 1},
+      "rowsync":   {"split_ks": [4,2,1,1], "SoftmaxRowTile" : 1},
     },
     512: {"TileSizes" : [256, 128, 32, 128, 64, 32], "MaxTBsPerSM": 2, "Best-Policy": "Row-Sync",
-      "baseline": {"split_ks": [4,4], "SoftmaxRowTile" : 1},
-      "tilesync":   {"split_ks": [2,1], "SoftmaxRowTile" : 1,
+      "baseline": {"split_ks": [6,2,1,1], "SoftmaxRowTile" : 1},
+      "tilesync":   {"split_ks": [6,2,1,1], "SoftmaxRowTile" : 1,
       "AvoidCustomOrder": False,
       "AvoidWaitKernel": False,
       "ReorderTileLoads": True},
-      "rowsync":   {"split_ks": [2,1], "SoftmaxRowTile" : 1},
+      "rowsync":   {"split_ks": [6,2,1,1], "SoftmaxRowTile" : 1},
     },
     256: {"TileSizes" : [256, 128, 32, 128, 64, 32], "MaxTBsPerSM": 2, "Best-Policy": "Tile-Sync",
-      "baseline": {"split_ks": [4,4], "SoftmaxRowTile" : 1},
-      "tilesync":   {"split_ks": [6,1], "SoftmaxRowTile" : 1,
+      "baseline": {"split_ks": [10,2,1,1], "SoftmaxRowTile" : 1},
+      "tilesync":   {"split_ks": [10,2,1,1], "SoftmaxRowTile" : 1,
       "AvoidCustomOrder": False,
       "AvoidWaitKernel": False,
       "ReorderTileLoads": True},
-      "rowsync":   {"split_ks": [6,1], "SoftmaxRowTile" : 1},
+      "rowsync":   {"split_ks": [10,2,1,1], "SoftmaxRowTile" : 1},
     },
     128: {"TileSizes" : [128, 128, 32, 64, 64, 32], "MaxTBsPerSM": 2, "Best-Policy": "Tile-Sync",
       "baseline": {"split_ks": [4,4], "SoftmaxRowTile" : 1},
@@ -653,7 +653,7 @@ if 'stridedsync' in policies and attention_or_mlp == 'mlp':
 
 deleteFiles(policies+['baseline'], attention_or_mlp)
 
-for m in [1,2,4,8,16,32,64,128,256,512,1024,2048]:
+for m in [256,512,1024,2048]: #1,2,4,8,16,32,64,128,
   if False:
     if attention_or_mlp == "attention":
       (s, o) = subprocess.getstatusoutput(f"python3 torch-baselines/torchAttention.py {m} {int(H/8)} {H} {H}")
@@ -668,7 +668,7 @@ for m in [1,2,4,8,16,32,64,128,256,512,1024,2048]:
 
     print(f'{m} & {H} & {"pytorch"} & {"%.2f"%float(ctime)}')
   
-  if True:
+  if False:
     genAndMakeStreamK(tiles[m])
     if model == 'gpt3' or (model == 'llama' and attention_or_mlp == 'attention'):
       streamk_command = buildDir("streamk-eval") + f" --m={m} --alpha=1 --beta=0 --iterations=20 "
@@ -715,7 +715,7 @@ for m in [1,2,4,8,16,32,64,128,256,512,1024,2048]:
 
   baselineDone = False
   bTimeTotal = 0
-  policies = ['rowsync', 'tilesync','stridedsync']
+  policies = ['rowsync']# 'tilesync','stridedsync']
   if 'stridedsync' in policies and attention_or_mlp == 'mlp':
     policies.pop(policies.index('stridedsync'))
 
@@ -723,10 +723,11 @@ for m in [1,2,4,8,16,32,64,128,256,512,1024,2048]:
     genFiles(tiles[m], syncPolicy, attention_or_mlp)
 
   makeFiles(policies+['baseline'], attention_or_mlp)
-  
+  split_ks = tiles[m]['baseline']['split_ks']
+  splitKArgs = " " + " ".join([f"--split-k{i+1} {split_ks[i]}" for i in range(len(split_ks))])
   baselineCommand = buildDir(f"{attention_or_mlp}-eval-baseline") + f" --batch {m} --check false --model {model.lower()}"
-  (s, o) = subprocess.getstatusoutput(baselineCommand + f" --split-k1 {tiles[m]['baseline']['split_ks'][0]}" + f" --split-k2 {tiles[m]['baseline']['split_ks'][1]}")
-  # print(o)
+  (s, o) = subprocess.getstatusoutput(baselineCommand + splitKArgs)
+
   if "Invalid" in o:
     pass
   elif s != 0:
@@ -743,8 +744,10 @@ for m in [1,2,4,8,16,32,64,128,256,512,1024,2048]:
   for syncPolicy in policies:
     command = buildDir(f"{attention_or_mlp}-eval-{syncPolicy}") + f" --batch {m} --check false --model {model.lower()}"
 
-    splitKs = tiles[m]["tilesync"] if syncPolicy == "stridedsync" else tiles[m][syncPolicy] 
-    (s, o) = subprocess.getstatusoutput(command + f" --split-k1 {splitKs['split_ks'][0]}" + f" --split-k2 {splitKs['split_ks'][1]}")
+    splitKs = tiles[m]["tilesync"] if syncPolicy == "stridedsync" else tiles[m][syncPolicy]
+    split_ks = splitKs['split_ks']
+    splitKArgs = " " + " ".join([f"--split-k{i+1} {split_ks[i]}" for i in range(len(split_ks))])
+    (s, o) = subprocess.getstatusoutput(command + splitKArgs)
   
     otime = -1
     if "Invalid" in o:
