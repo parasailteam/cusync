@@ -572,9 +572,6 @@ public:
     // The last kblock is loaded in the prolog
     uint startK = tb_offset_A.column();//(total_gemm_k_iterations - gemm_k_iterations)*Shape::kK;
     if (custage.isConsumer()) {
-      // if (threadIdx.x == 0) {
-      //   printf("563: %d\n", tb_offset_A.row());
-      // }
       dim3 tile = {(uint)tb_offset_A.row()/Shape::kM, startK/Shape::kN, 0};
       #ifdef REORDER_TILE_LOADS
       custage.wait(tile, 0, false);

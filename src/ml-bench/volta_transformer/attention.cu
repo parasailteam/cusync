@@ -48,8 +48,8 @@
 
 #ifndef EVAL_TILE_SIZES
 //Tile sizes of all GeMMs
-using ShapeMMAThreadBlock = cutlass::gemm::GemmShape<64, 256, 32>;  
-using ShapeMMAWarp = cutlass::gemm::GemmShape<32, 128, 32>;
+using ShapeMMAThreadBlock = cutlass::gemm::GemmShape<256, 128, 32>;  
+using ShapeMMAWarp = cutlass::gemm::GemmShape<128, 64, 32>;
 const int SoftmaxRowTile = 1;
 #else
 //<eval tiles>
@@ -754,22 +754,36 @@ cudaError_t runAttentionCuSync(int split_k1, int split_k2, int split_k3, int spl
     CUTLASS_CHECK(status);
 
     xqkvstage.invokeWaitKernel(streams[1]);
+    //Consider P=Q*K.T and O = S*V as a single kernel pipeline
+    //because FlashAttention and xformers consider this as a 
+    //single kernel
     status = gemm_op2.run(true, NULL, streams[1]);
     CUTLASS_CHECK(status);
 
-    scustage.invokeWaitKernel(streams[2]);
-    status = gemm_op3.run(true, NULL, streams[2]);
+    // scustage.invokeWaitKernel(streams[2]);
+    status = gemm_op3.run(true, NULL, streams[1]);
     CUTLASS_CHECK(status);
 
     ocustage.invokeWaitKernel(streams[3]);
     status = gemm_op4.run(true, NULL, streams[3]);
     CUTLASS_CHECK(status);
 
+    CUDA_CHECK(cudaDeviceSynchronize());
+    double end = timeInMicroSeconds();
+
     if (status != cutlass::Status::kSuccess) {
       return cudaErrorUnknown;
     }
-    CUDA_CHECK(cudaDeviceSynchronize());
-    double end = timeInMicroSeconds();
+
+    xqkvstage.incrementIter();
+    scustage.incrementIter();
+    ocustage.incrementIter();
+    xw12custage.incrementIter();
+
+    gemm_op1.params_.custage.incrementIter();
+    gemm_op2.params_.custage.incrementIter();
+    gemm_op3.params_.custage.incrementIter();
+    gemm_op4.params_.custage.incrementIter();
 
     if (iters > 10)
       printf("{\"Total\": %lf}\n",end-start);
