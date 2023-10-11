@@ -75,10 +75,7 @@ struct StridedSync {
     {return 1;}
 
   __device__ constexpr uint tileIndex(const dim3& tile, const dim3& grid) {
-    if (grid.y > ((H/8)/Tile))
-      return tile.x * (grid.y/((H/8)/Tile)) + tile.y%((H/8)/Tile);
-    else
-    return tile.x * grid.y + tile.y;
+    return tile.x * (grid.y/((H/8)/Tile)) + tile.y%((H/8)/Tile);
   }
 
   __device__ bool isSync(const dim3& tile, const dim3& grid) {
@@ -90,17 +87,35 @@ const int SoftmaxThreads = ShapeMMAThreadBlock::kN;
 using ShapeMMAOp = cutlass::gemm::GemmShape<8, 8, 4>;  
 using namespace cusync;
 
+// #define AVOID_CUSTOM_ORDER
+// #define AVOID_WAIT_KERNEL
+
+const uint Opts = 
+#ifdef AVOID_CUSTOM_ORDER
+  Optimizations::AvoidCustomOrder |
+#endif
+#ifdef AVOID_WAIT_KERNEL
+  Optimizations::AvoidWaitKernel  |
+#endif
+#ifdef NO_ATOMIC_ADD
+  Optimizations::NoAtomicAdd      |
+#endif
+#ifdef REORDER_TILE_LOADS
+  Optimizations::ReorderTileLoads |
+#endif
+  Optimizations::NoOptimization;
+
 #ifdef ROWSYNC 
-  using XQKVCuStage = CuStage<CuStageType::Producer, RowMajorZYX, NoSync, RowSync>;
-  using SCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX, RowSync, RowSync>;
-  using OCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX, RowSync, RowSync>;
-  using XW12CuStage = CuStage<CuStageType::Consumer, RowMajorZYX, RowSync, NoSync>;
+  using XQKVCuStage = CuStage<CuStageType::Producer, RowMajorZYX, NoSync, RowSync, Opts>;
+  using SCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX, RowSync, RowSync, Opts | Optimizations::AvoidCustomOrder>;
+  using OCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX, RowSync, RowSync, Opts | Optimizations::AvoidCustomOrder>;
+  using XW12CuStage = CuStage<CuStageType::Consumer, RowMajorZYX, RowSync, NoSync, Opts>;
   using Sync = RowSync;
 #elif defined(TILESYNC)
-  using XQKVCuStage = CuStage<CuStageType::Producer, RowMajorZYX, NoSync, TileSync>;
-  using SCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX, TileSync, TileSync>;
-  using OCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX, TileSync, TileSync>;
-  using XW12CuStage = CuStage<CuStageType::Consumer, RowMajorZYX, TileSync, NoSync>;
+  using XQKVCuStage = CuStage<CuStageType::Producer, RowMajorZYX, NoSync, TileSync, Opts>;
+  using SCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX, TileSync, TileSync, Opts | Optimizations::AvoidCustomOrder>;
+  using OCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX, TileSync, TileSync, Opts | Optimizations::AvoidCustomOrder>;
+  using XW12CuStage = CuStage<CuStageType::Consumer, RowMajorZYX, TileSync, NoSync, Opts>;
 #elif defined(STRIDEDSYNC)
   #if defined(GPT3)
     using StridedSyncImpl = StridedSync<12288, ShapeMMAThreadBlock::kN, 3>;
@@ -109,10 +124,10 @@ using namespace cusync;
   #else
     #error "GPT3 or LLaMA"
   #endif
-  using XQKVCuStage = CuStage<CuStageType::Producer, RowMajorZYX, NoSync, StridedSyncImpl>;
-  using SCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX, StridedSyncImpl, TileSync>;
-  using OCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX, TileSync, TileSync>;
-  using XW12CuStage = CuStage<CuStageType::Consumer, RowMajorZYX, TileSync, NoSync>;
+  using XQKVCuStage = CuStage<CuStageType::Producer, RowMajorZYX, NoSync, StridedSyncImpl, Opts>;
+  using SCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX, StridedSyncImpl, TileSync, Opts | Optimizations::AvoidCustomOrder>;
+  using OCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX, TileSync, TileSync, Opts | Optimizations::AvoidCustomOrder>;
+  using XW12CuStage = CuStage<CuStageType::Consumer, RowMajorZYX, TileSync, NoSync, Opts>;
 #else
   #error "Unknown Synchronization"
 #endif 
@@ -754,14 +769,11 @@ cudaError_t runAttentionCuSync(int split_k1, int split_k2, int split_k3, int spl
     CUTLASS_CHECK(status);
 
     xqkvstage.invokeWaitKernel(streams[1]);
-    //Consider P=Q*K.T and O = S*V as a single kernel pipeline
-    //because FlashAttention and xformers consider this as a 
-    //single kernel
     status = gemm_op2.run(true, NULL, streams[1]);
     CUTLASS_CHECK(status);
 
-    // scustage.invokeWaitKernel(streams[2]);
-    status = gemm_op3.run(true, NULL, streams[1]);
+    scustage.invokeWaitKernel(streams[2]);
+    status = gemm_op3.run(true, NULL, streams[2]);
     CUTLASS_CHECK(status);
 
     ocustage.invokeWaitKernel(streams[3]);
@@ -867,6 +879,7 @@ int run(int argc, char* argv[]) {
     } else if (arg.find(argNames[1]) == 0) {
       std::stringstream ss(argv[i+1]);
       ss >> batch;
+      batch = max(batch, 8);
       i = i + 1;
     } else if (arg.find(argNames[2]) == 0) {
       std::string val = std::string(argv[i+1]);

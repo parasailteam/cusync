@@ -539,12 +539,12 @@ elif model == "llama" and attention_or_mlp == "attention":
       "rowsync":   {"split_ks": [2,1,1,1], "SoftmaxRowTile" : 1},
     },
     512: {"TileSizes" : [256, 128, 32, 128, 64, 32], "MaxTBsPerSM": 2, "Best-Policy": "Row-Sync",
-      "baseline": {"split_ks": [6,2,1,1], "SoftmaxRowTile" : 1},
-      "tilesync":   {"split_ks": [6,2,1,1], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": False,
-      "AvoidWaitKernel": False,
+      "baseline": {"split_ks": [3,2,1,1], "SoftmaxRowTile" : 1},
+      "tilesync":   {"split_ks": [3,2,1,1], "SoftmaxRowTile" : 1,
+      "AvoidCustomOrder": True,
+      "AvoidWaitKernel": True,
       "ReorderTileLoads": True},
-      "rowsync":   {"split_ks": [6,2,1,1], "SoftmaxRowTile" : 1},
+      "rowsync":   {"split_ks": [3,2,1,1], "SoftmaxRowTile" : 1},
     },
     256: {"TileSizes" : [256, 128, 32, 128, 64, 32], "MaxTBsPerSM": 2, "Best-Policy": "Tile-Sync",
       "baseline": {"split_ks": [10,2,1,1], "SoftmaxRowTile" : 1},
@@ -575,62 +575,62 @@ elif model == "llama" and attention_or_mlp == "attention":
     32: {"TileSizes" : [32, 256, 32, 32, 64, 32], "MaxTBsPerSM": 3,
       "baseline": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
       "tilesync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": False,
-      "AvoidWaitKernel": False,
+      "AvoidCustomOrder": True,
+      "AvoidWaitKernel": True,
       "ReorderTileLoads": True,},
       "rowsync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": False,
-      "AvoidWaitKernel": False}
+      "AvoidCustomOrder": True,
+      "AvoidWaitKernel": True}
     },
     16: {"TileSizes" : [32, 256, 32, 32, 64, 32], "MaxTBsPerSM": 3,
       "baseline": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
       "tilesync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": False,
-      "AvoidWaitKernel": False,
+      "AvoidCustomOrder": True,
+      "AvoidWaitKernel": True,
       "ReorderTileLoads": True,},
       "rowsync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": False,
-      "AvoidWaitKernel": False}
+      "AvoidCustomOrder": True,
+      "AvoidWaitKernel": True}
     },
     8: {"TileSizes" : [32, 256, 32, 32, 64, 32], "MaxTBsPerSM": 3,
       "baseline": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
       "tilesync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": False,
-      "AvoidWaitKernel": False,
+      "AvoidCustomOrder": True,
+      "AvoidWaitKernel": True,
       "ReorderTileLoads": True},
       "rowsync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": False,
-      "AvoidWaitKernel": False}
+      "AvoidCustomOrder": True,
+      "AvoidWaitKernel": True}
     },
     4: {"TileSizes" : [32, 256, 32, 32, 64, 32], "MaxTBsPerSM": 3,
-      "baseline": {"split_ks": [8,8], "SoftmaxRowTile" : 1},
-      "tilesync": {"split_ks": [6,2], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": False,
-      "AvoidWaitKernel": False,
+      "baseline": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
+      "tilesync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
+      "AvoidCustomOrder": True,
+      "AvoidWaitKernel": True,
       "ReorderTileLoads": True},
-      "rowsync": {"split_ks": [6,2], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": False,
-      "AvoidWaitKernel": False}
+      "rowsync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
+      "AvoidCustomOrder": True,
+      "AvoidWaitKernel": True}
     },
     2: {"TileSizes" : [32, 256, 32, 32, 64, 32], "MaxTBsPerSM": 3,
-      "baseline": {"split_ks": [8,8], "SoftmaxRowTile" : 1},
-      "tilesync": {"split_ks": [6,2], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": False,
-      "AvoidWaitKernel": False,
+      "baseline": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
+      "tilesync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
+      "AvoidCustomOrder": True,
+      "AvoidWaitKernel": True,
       "ReorderTileLoads": True},
-      "rowsync": {"split_ks": [6,2], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": False,
-      "AvoidWaitKernel": False}
+      "rowsync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
+      "AvoidCustomOrder": True,
+      "AvoidWaitKernel": True}
     },
     1: {"TileSizes" : [32, 256, 32, 32, 64, 32], "MaxTBsPerSM": 3,
-      "baseline": {"split_ks": [8,8], "SoftmaxRowTile" : 1},
-      "tilesync": {"split_ks": [6,2], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": False,
-      "AvoidWaitKernel": False,
+      "baseline": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
+      "tilesync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
+      "AvoidCustomOrder": True,
+      "AvoidWaitKernel": True,
       "ReorderTileLoads": True},
-      "rowsync": {"split_ks": [6,2], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": False,
-      "AvoidWaitKernel": False}
+      "rowsync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
+      "AvoidCustomOrder": True,
+      "AvoidWaitKernel": True}
     }
   }
 
@@ -653,7 +653,7 @@ if 'stridedsync' in policies and attention_or_mlp == 'mlp':
 
 deleteFiles(policies+['baseline'], attention_or_mlp)
 
-for m in [8,16,32,64,128,256,512,1024,2048]:
+for m in [512,1024,2048]: #1,2,4,8,16,32,64,128,256,
   if False:
     if attention_or_mlp == "attention":
       (s, o) = subprocess.getstatusoutput(f"python3 torch-baselines/torchAttention.py {m} {int(H/8)} {H} {H}")
