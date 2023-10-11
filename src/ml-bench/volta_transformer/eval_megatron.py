@@ -555,50 +555,50 @@ elif model == "llama" and attention_or_mlp == "attention":
       "rowsync":   {"split_ks": [10,2,1,1], "SoftmaxRowTile" : 1},
     },
     128: {"TileSizes" : [128, 128, 32, 64, 64, 32], "MaxTBsPerSM": 2, "Best-Policy": "Tile-Sync",
-      "baseline": {"split_ks": [4,4], "SoftmaxRowTile" : 1},
-      "tilesync":   {"split_ks": [6,1], "SoftmaxRowTile" : 1,
+      "baseline": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
+      "tilesync":   {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
       "AvoidCustomOrder": False,
       "AvoidWaitKernel": False,
       "ReorderTileLoads": True},
-      "rowsync":   {"split_ks": [6,1], "SoftmaxRowTile" : 1},
+      "rowsync":   {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
     },
     64: {"TileSizes" : [64, 256, 32, 32, 128, 32], "MaxTBsPerSM": 3, "Best-Policy": "Tile-Sync",
-      "baseline": {"split_ks": [8,8], "SoftmaxRowTile" : 1},
-      "tilesync": {"split_ks": [6,2], "SoftmaxRowTile" : 2,
+      "baseline": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
+      "tilesync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 2,
       "AvoidCustomOrder": False,
       "AvoidWaitKernel": False,
       "ReorderTileLoads": True,},
-      "rowsync": {"split_ks": [6,2], "SoftmaxRowTile" : 2,
+      "rowsync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 2,
       "AvoidCustomOrder": False,
       "AvoidWaitKernel": False}
     },
     32: {"TileSizes" : [32, 256, 32, 32, 64, 32], "MaxTBsPerSM": 3,
-      "baseline": {"split_ks": [8,8], "SoftmaxRowTile" : 1},
-      "tilesync": {"split_ks": [6,2], "SoftmaxRowTile" : 1,
+      "baseline": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
+      "tilesync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
       "AvoidCustomOrder": False,
       "AvoidWaitKernel": False,
       "ReorderTileLoads": True,},
-      "rowsync": {"split_ks": [6,2], "SoftmaxRowTile" : 1,
+      "rowsync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
       "AvoidCustomOrder": False,
       "AvoidWaitKernel": False}
     },
     16: {"TileSizes" : [32, 256, 32, 32, 64, 32], "MaxTBsPerSM": 3,
-      "baseline": {"split_ks": [8,8], "SoftmaxRowTile" : 1},
-      "tilesync": {"split_ks": [6,2], "SoftmaxRowTile" : 1,
+      "baseline": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
+      "tilesync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
       "AvoidCustomOrder": False,
       "AvoidWaitKernel": False,
       "ReorderTileLoads": True,},
-      "rowsync": {"split_ks": [6,2], "SoftmaxRowTile" : 1,
+      "rowsync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
       "AvoidCustomOrder": False,
       "AvoidWaitKernel": False}
     },
     8: {"TileSizes" : [32, 256, 32, 32, 64, 32], "MaxTBsPerSM": 3,
-      "baseline": {"split_ks": [8,8], "SoftmaxRowTile" : 1},
-      "tilesync": {"split_ks": [6,2], "SoftmaxRowTile" : 1,
+      "baseline": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
+      "tilesync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
       "AvoidCustomOrder": False,
       "AvoidWaitKernel": False,
       "ReorderTileLoads": True},
-      "rowsync": {"split_ks": [6,2], "SoftmaxRowTile" : 1,
+      "rowsync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
       "AvoidCustomOrder": False,
       "AvoidWaitKernel": False}
     },
@@ -653,7 +653,7 @@ if 'stridedsync' in policies and attention_or_mlp == 'mlp':
 
 deleteFiles(policies+['baseline'], attention_or_mlp)
 
-for m in [256,512,1024,2048]: #1,2,4,8,16,32,64,128,
+for m in [8,16,32,64,128,256,512,1024,2048]:
   if False:
     if attention_or_mlp == "attention":
       (s, o) = subprocess.getstatusoutput(f"python3 torch-baselines/torchAttention.py {m} {int(H/8)} {H} {H}")
@@ -715,7 +715,7 @@ for m in [256,512,1024,2048]: #1,2,4,8,16,32,64,128,
 
   baselineDone = False
   bTimeTotal = 0
-  policies = ['rowsync']# 'tilesync','stridedsync']
+  policies = ['rowsync', 'tilesync', 'stridedsync']
   if 'stridedsync' in policies and attention_or_mlp == 'mlp':
     policies.pop(policies.index('stridedsync'))
 
@@ -742,7 +742,11 @@ for m in [256,512,1024,2048]: #1,2,4,8,16,32,64,128,
     baselineDone = True
 
   for syncPolicy in policies:
-    command = buildDir(f"{attention_or_mlp}-eval-{syncPolicy}") + f" --batch {m} --check false --model {model.lower()}"
+    if syncPolicy == 'stridedsync':
+      b = f"{attention_or_mlp}-{model}-eval-{syncPolicy}"
+    else:
+      b = f"{attention_or_mlp}-eval-{syncPolicy}"
+    command = buildDir(b) + f" --batch {m} --check false --model {model.lower()}"
 
     splitKs = tiles[m]["tilesync"] if syncPolicy == "stridedsync" else tiles[m][syncPolicy]
     split_ks = splitKs['split_ks']
