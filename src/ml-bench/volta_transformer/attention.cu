@@ -57,14 +57,11 @@ struct RowMajorZYX__1 {
 
 #ifndef EVAL_TILE_SIZES
 //Tile sizes of all GeMMs
-using ShapeMMAThreadBlock = cutlass::gemm::GemmShape<256, 128, 32>;
-using ShapeMMAWarp = cutlass::gemm::GemmShape<128, 64, 32>;
-
-struct TileSizeXW12 {
+struct TileSizeLinearLayers {
   using ShapeMMAThreadBlock = cutlass::gemm::GemmShape<256, 128, 32>;
   using ShapeMMAWarp = cutlass::gemm::GemmShape<128, 64, 32>;
 };
-struct TileSizeEpilogue {
+struct TileSizeAttention {
   using ShapeMMAThreadBlock = cutlass::gemm::GemmShape<256, 128, 32>;
   using ShapeMMAWarp = cutlass::gemm::GemmShape<128, 64, 32>;
 };
@@ -267,6 +264,7 @@ struct AttentionParams {
   cutlass::TensorRef<ElementInputA, LayoutInputA> xqkv;
 
   HostTensor ref_xqkv;
+  HostTensor ref_xqkv_storage;
   HostTensor ref_s;
   HostTensor ref_p;
   HostTensor ref_o;
@@ -278,13 +276,15 @@ struct AttentionParams {
   ElementComputeEpilogue alpha;
   ElementComputeEpilogue beta;
 
+  uint model_parallel_H;
+  
   AttentionParams(std::string model, int batch, int seqlen, int hidden_dim, bool check) {
     this->model = model;
     this->seqlen = seqlen;
     this->hidden_dim = hidden_dim;
     this->batch = batch;
     int numGPUs = 8;
-    int model_parallel_H = hidden_dim/numGPUs;
+    model_parallel_H = hidden_dim/numGPUs;
     gemm_size_xqkv = cutlass::gemm::GemmCoord(batch, model_parallel_H * 3, hidden_dim);
     size_xqkv_storage = cutlass::gemm::GemmCoord(batch + seqlen, model_parallel_H * 3, hidden_dim);
     gemm_size_s = cutlass::gemm::GemmCoord(batch, batch + seqlen, model_parallel_H);
@@ -302,9 +302,10 @@ struct AttentionParams {
     w2   = HostTensor(gemm_size_xw12.kn());
     xw12 = HostTensor(gemm_size_xw12.mn());
 
-    xqkv = {xqkv_storage.device_data() + seqlen*model_parallel_H, LayoutInputA()};
-
-    ref_xqkv = HostTensor(size_xqkv_storage.mn());
+    xqkv = {xqkv_storage.device_data() + seqlen*model_parallel_H, LayoutInputA(3*model_parallel_H)};
+    printf("309: %p %p\n", xqkv.data(), xqkv_storage.device_data());
+    ref_xqkv = HostTensor(gemm_size_xqkv.mn());
+    ref_xqkv_storage = HostTensor(size_xqkv_storage.mn());
     ref_s = HostTensor(gemm_size_s.mn());
     ref_o = HostTensor(gemm_size_o.mn());
     ref_xw12 = HostTensor(gemm_size_xw12.mn());
@@ -320,12 +321,17 @@ struct AttentionParams {
     if (refCheck) {
       memset_random2(x.host_data(), ElementOutput(0.005), 
                      ElementOutput(0.01), x.size());
+      memset_random2(xqkv_storage.host_data(), ElementOutput(0.005), 
+                     ElementOutput(0.01), xqkv_storage.size());
+      memcpy(ref_xqkv_storage.host_data(), xqkv_storage.host_data(), ref_xqkv_storage.size() * sizeof(ElementInputA));
       memset_random2(qkv.host_data(), ElementOutput(0.005), 
                      ElementOutput(0.01), qkv.size());
       memset_random2(w2.host_data(), ElementOutput(0.01),
                      ElementOutput(0.05), w2.size());
     } else {
       cutlass::reference::host::TensorFill(x.host_view(),
+                                           ElementOutput(0.05));
+      cutlass::reference::host::TensorFill(xqkv_storage.host_view(),
                                            ElementOutput(0.05));
       cutlass::reference::host::TensorFill(qkv.host_view(),
                                            ElementOutput(0.5));
@@ -334,6 +340,8 @@ struct AttentionParams {
     }
 
     // Copy data from host to GPU
+    xqkv_storage.sync_device();
+    ref_xqkv_storage.sync_device();
     x.sync_device();
     qkv.sync_device();
     w2.sync_device();
@@ -341,7 +349,6 @@ struct AttentionParams {
 
   void initOuts() {
     //Zeros all output tensors
-    cutlass::reference::host::TensorFill(xqkv_storage.host_view());
     cutlass::reference::host::TensorFill(s.host_view());
     cutlass::reference::host::TensorFill(p.host_view());
     cutlass::reference::host::TensorFill(o.host_view());
@@ -456,24 +463,28 @@ cudaError_t host_attention(AttentionParams& attnParams) {
                 attnParams.qkv.device_data(), attnParams.ref_xqkv.host_data());
   
   //assert(attnParams.ref_xdot.size() == attnParams.gemm_size1.m() * attnParams.gemm_size1.n()/3);
-  size_t N = attnParams.gemm_size_xqkv.n()/3;
-  size_t B = attnParams.gemm_size_xqkv.m();
-  ElementOutput* host_xqkv = attnParams.ref_xqkv.host_data();
-
+  size_t N = attnParams.model_parallel_H;
+  size_t B = attnParams.batch;
+  size_t SEQ = attnParams.seqlen;
+  memcpy(attnParams.ref_xqkv_storage.host_data() + SEQ*N, attnParams.ref_xqkv.host_data(),
+         attnParams.ref_xqkv.size() * sizeof(ElementInputA));
+  
+  ElementOutput* host_xq = attnParams.ref_xqkv.host_data();
+  ElementOutput* host_xqkv = attnParams.ref_xqkv_storage.host_data();
   ElementOutput* host_s = attnParams.ref_s.host_data();
 
   for (size_t i = 0; i < B; i++) {
-    for (size_t j = 0; j < B; j++) {
+    for (size_t j = 0; j < B + SEQ; j++) {
       ElementAccumulator result = 0.0f;
       ElementOutput r1 = (ElementOutput)0.0f;
 
       for (size_t k = 0; k < N; k++) {
-        ElementOutput host_xq = host_xqkv[i * 3 * N + k];
-        ElementOutput host_xk = host_xqkv[j * 3 * N + k + N];
-        result += host_xq * host_xk;
-        r1 += host_xq * host_xk;
+        ElementOutput xq = host_xq[i * 3 * N + k];
+        ElementOutput xk = host_xqkv[j * 3 * N + k + N];
+        result += xq * xk;
+        r1 += xq * xk;
       }
-      host_s[i * B + j] = (ElementOutput)result;
+      host_s[i * (B + SEQ) + j] = (ElementOutput)result;
     }
   }
 
@@ -497,10 +508,10 @@ cudaError_t host_attention(AttentionParams& attnParams) {
     for (size_t j = 0; j < N; j++) {
       ElementAccumulator result = 0.0f;
       
-      for (size_t k = 0; k < B; k++) {
+      for (size_t k = 0; k < B + SEQ; k++) {
         ElementOutput host_xv = host_xqkv[k * 3 * N + j + N * 2];
         
-        result += host_xv * host_p[i*B + k];
+        result += host_xv * host_p[i*(B+SEQ) + k];
       }
       host_o[i * N + j] = (ElementOutput)result;
     }
@@ -510,7 +521,6 @@ cudaError_t host_attention(AttentionParams& attnParams) {
 
   attnRefMatmul(attnParams.gemm_size_xw12, attnParams.ref_o.device_data(), 
                 attnParams.w2.device_data(), attnParams.ref_xw12.host_data());
-  
   return cudaSuccess;
 }
 
@@ -521,14 +531,15 @@ cudaError_t check_results(AttentionParams& attnParams) {
   }
   attnParams.xqkv_storage.sync_host();
   printf("Checking XQKV=X*QKV\n");
+
   bool eq = equals(attnParams.ref_xqkv.size(), 
                    attnParams.ref_xqkv.host_data(), 
-                   attnParams.xqkv_storage.host_data(), 1e-1f);
+                   attnParams.xqkv_storage.host_data() + attnParams.model_parallel_H * attnParams.seqlen, 1e-1f);
   if (eq == false) {
     printf("not correct\n");
     return cudaErrorUnknown;
   }
-  
+
   attnParams.s.sync_host();
   printf("Checking S=Q*K.T\n");
   eq = equals(attnParams.ref_s.size(), attnParams.ref_s.host_data(),
@@ -571,6 +582,7 @@ cudaError_t runAttentionBaseline(int split_k1, int split_k2, int split_k3, int s
                                  int iters = 100) {  
   // ElementOutput* device_xqkv = tensor_xqkv.device_data();
   cutlass::Status status;
+  std::cout << "gemm_size_xqkv.m() " << attnParams.gemm_size_xqkv.m() << " n " << attnParams.gemm_size_xqkv.n() << " k " << attnParams.gemm_size_xqkv.k() << std::endl;
   //Setup First GeMM
   typename GemmTy1::Arguments args1{attnParams.gemm_size_xqkv,
                                     attnParams.x.device_ref(),
@@ -588,14 +600,12 @@ cudaError_t runAttentionBaseline(int split_k1, int split_k2, int split_k3, int s
 
   size_t N = attnParams.gemm_size_xqkv.n()/3;
 
-  ElementOutput* device_xq = attnParams.xqkv_storage.device_data() + 0;
-  cutlass::TensorRef xq{device_xq, LayoutInputA(3*N)}; 
   ElementOutput* device_xk = attnParams.xqkv_storage.device_data() + N;
   cutlass::TensorRef xk{device_xk, LayoutK(3*N)};
 
   //Setup S=Q*K.T GeMM
   typename GemmTy2::Arguments args2{attnParams.gemm_size_s,
-                                    xq, xk,
+                                    attnParams.xqkv, xk,
                                     attnParams.s.device_ref(),
                                     attnParams.s.device_ref(),
                                     {attnParams.alpha, attnParams.beta},
@@ -717,14 +727,13 @@ cudaError_t runAttentionCuSync(int split_k1, int split_k2, int split_k3, int spl
                                cudaStream_t streams[],
                                double& execTime,
                                int iters = 100) {
-#if 0
   //Setup XQKV = X * QKV GeMM
   typename XQKVCuSyncGemmTy::Arguments args1{xqkvstage,
                                             attnParams.gemm_size_xqkv,
                                             attnParams.x.device_ref(),
                                             attnParams.qkv.device_ref(),
-                                            attnParams.xqkv.device_ref(),
-                                            attnParams.xqkv.device_ref(),
+                                            attnParams.xqkv,
+                                            attnParams.xqkv,
                                             {attnParams.alpha, attnParams.beta},
                                             split_k1};
   size_t workspace_size = XQKVCuSyncGemmTy::get_workspace_size(args1);
@@ -737,15 +746,13 @@ cudaError_t runAttentionCuSync(int split_k1, int split_k2, int split_k3, int spl
   CUTLASS_CHECK(status);
 
   size_t N = attnParams.gemm_size_xqkv.n()/3;
-  ElementOutput* device_xq = attnParams.xqkv.device_data() + 0;
-  cutlass::TensorRef xq{device_xq, LayoutInputA(3*N)}; 
-  ElementOutput* device_xk = attnParams.xqkv.device_data() + N;
+  ElementOutput* device_xk = attnParams.xqkv_storage.device_data() + N;
   cutlass::TensorRef xk{device_xk, LayoutK(3*N)};
 
   //Setup S = Q * K.T GeMM
   typename SCuSyncGemmTy::Arguments args2{scustage,
                                     attnParams.gemm_size_s,
-                                    xq, xk,
+                                    attnParams.xqkv, xk,
                                     attnParams.s.device_ref(),
                                     attnParams.s.device_ref(),
                                     {attnParams.alpha, attnParams.beta},
@@ -758,7 +765,7 @@ cudaError_t runAttentionCuSync(int split_k1, int split_k2, int split_k3, int spl
   status = gemm_op2.initialize(args2, workspace2.get());
   CUTLASS_CHECK(status);
   
-  ElementOutput* device_xv = attnParams.xqkv.device_data() + N;
+  ElementOutput* device_xv = attnParams.xqkv_storage.device_data() + N;
   cutlass::TensorRef xv{device_xv, LayoutInputB(3*N)};
 
   //Setup O=S*V GeMM
@@ -838,7 +845,6 @@ cudaError_t runAttentionCuSync(int split_k1, int split_k2, int split_k3, int spl
   }
 
   return cudaSuccess;
-#endif
 }
 
 cudaError_t runAttentionCuSync(int split_k1, int split_k2, int split_k3, int split_k4,
@@ -917,7 +923,6 @@ int run(int argc, char* argv[]) {
     } else if (arg.find(argNames[1]) == 0) {
       std::stringstream ss(argv[i+1]);
       ss >> batch;
-      batch = max(batch, 8);
       i = i + 1;
     } else if (arg.find(argNames[2]) == 0) {
       std::string val = std::string(argv[i+1]);
