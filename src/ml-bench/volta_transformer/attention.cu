@@ -42,8 +42,8 @@
 // #define AVOID_WAIT_KERNEL
 #endif
 
-// #define AVOID_CUSTOM_ORDER
-// #define AVOID_WAIT_KERNEL
+#define AVOID_CUSTOM_ORDER
+#define AVOID_WAIT_KERNEL
 
 #include<cusync/cusync.h>
 
@@ -58,14 +58,16 @@ struct RowMajorZYX__1 {
 #ifndef EVAL_TILE_SIZES
 //Tile sizes of all GeMMs
 struct TileSizeLinearLayers {
-  using ShapeMMAThreadBlock = cutlass::gemm::GemmShape<256, 128, 32>;
-  using ShapeMMAWarp = cutlass::gemm::GemmShape<128, 64, 32>;
+  typedef cutlass::gemm::GemmShape<32, 128, 32> ShapeMMAThreadBlock;
+  typedef cutlass::gemm::GemmShape<32, 32, 32> ShapeMMAWarp;
 };
 struct TileSizeAttention {
-  using ShapeMMAThreadBlock = cutlass::gemm::GemmShape<256, 128, 32>;
-  using ShapeMMAWarp = cutlass::gemm::GemmShape<128, 64, 32>;
+  typedef cutlass::gemm::GemmShape<256, 128, 32> ShapeMMAThreadBlock;
+  typedef cutlass::gemm::GemmShape<128, 64, 32> ShapeMMAWarp;
 };
 const int SoftmaxRowTile = 1;
+// using ShapeMMAThreadBlock = cutlass::gemm::GemmShape<256, 128, 32>;
+// using ShapeMMAWarp = cutlass::gemm::GemmShape<128, 64, 32>;
 #else
 //<eval tiles>
 const int SoftmaxRowTile = 1;
@@ -98,7 +100,7 @@ struct StridedSync {
   }
 };
 
-const int SoftmaxThreads = ShapeMMAThreadBlock::kN;
+// const int SoftmaxThreads = ShapeMMAThreadBlock::kN;
 using ShapeMMAOp = cutlass::gemm::GemmShape<8, 8, 4>;  
 using namespace cusync;
 
@@ -168,49 +170,55 @@ using EpilogueOp = cutlass::epilogue::thread::LinearCombination<
     ElementAccumulator,
     ElementComputeEpilogue>;
 
-template<bool splitK>
-class BaseMLPGemm : public cutlass::gemm::device::Gemm<ElementInputA, LayoutInputA, 
+template<typename TileSize, bool splitK>
+class BaseLinearGemm : public cutlass::gemm::device::Gemm<ElementInputA, LayoutInputA, 
                                                         ElementInputB, LayoutInputB,
                                                         ElementOutput, LayoutOutput,
                                                         ElementAccumulator, MMAOp,
-                                                        SmArch, ShapeMMAThreadBlock,
-                                                        ShapeMMAWarp, ShapeMMAOp,
+                                                        SmArch, 
+                                                        typename TileSize::ShapeMMAThreadBlock,
+                                                        typename TileSize::ShapeMMAWarp, 
+                                                        ShapeMMAOp,
                                                         EpilogueOp, 
                                                         cutlass::gemm::threadblock::CuSyncGemmHorizontalThreadblockSwizzle, 
                                                         2, 8, 8, splitK> {};
 
 // Baseline GeMMs
-using Gemm1 = BaseMLPGemm<false>;
-using Gemm2 = BaseMLPGemm<false>;
-using LayoutK = cutlass::layout::ColumnMajor;
+using LinearLayerGemm = BaseLinearGemm<TileSizeLinearLayers, false>;
+using AttnGemm2 = BaseLinearGemm<TileSizeAttention, false>;
 
+//Baseline GeMMs with SplitK enabled
+using LinearLayerGemmSplitK = BaseLinearGemm<TileSizeLinearLayers, true>;
+using AttnGemm2SplitK = BaseLinearGemm<TileSizeAttention, true>;
+
+using LayoutK = cutlass::layout::ColumnMajor;
 template<bool splitK>
 class BColumnMajorGemm : public cutlass::gemm::device::Gemm<ElementInputA, LayoutInputA, 
                                                      ElementInputB, LayoutK,
                                                      ElementOutput, LayoutOutput,
                                                      ElementAccumulator, MMAOp,
-                                                     SmArch, ShapeMMAThreadBlock,
-                                                     ShapeMMAWarp, ShapeMMAOp,
+                                                     SmArch, 
+                                                     TileSizeAttention::ShapeMMAThreadBlock,
+                                                     TileSizeAttention::ShapeMMAWarp,
+                                                     ShapeMMAOp,
                                                      EpilogueOp, 
                                                      cutlass::gemm::threadblock::CuSyncGemmHorizontalThreadblockSwizzle, 
                                                      2, 8, 8, splitK> {};
 
 // Baseline GeMMs
-using BColumnMajorGemm1 = BColumnMajorGemm<false>;
-using BColumnMajorGemmSplitK1 = BColumnMajorGemm<true>;
-
-//Baseline GeMMs with SplitK enabled
-using GemmSplitK1 = BaseMLPGemm<true>;
+using AttnColumnMajorGemm1 = BColumnMajorGemm<false>;
+using AttnColumnMajorGemmSplitK1 = BColumnMajorGemm<true>;
 
 //CuSync GeMMs
-template<typename CuStage, bool splitK>
-class CuSyncAttentionGemm : public cutlass::gemm::device::CuSyncGemm<CuStage, 
+template<typename CuStage, typename TileSize, bool splitK>
+class CuSyncLinearLayerGemm : public cutlass::gemm::device::CuSyncGemm<CuStage, 
                                                     ElementInputA, LayoutInputA, 
                                                     ElementInputB, LayoutInputB,
                                                     ElementOutput, LayoutOutput,
                                                     ElementAccumulator, MMAOp,
-                                                    SmArch, ShapeMMAThreadBlock,
-                                                    ShapeMMAWarp, ShapeMMAOp,
+                                                    SmArch, 
+                                                    typename TileSize::ShapeMMAThreadBlock,
+                                                    typename TileSize::ShapeMMAWarp, ShapeMMAOp,
                                                     EpilogueOp, 
                                                     cutlass::gemm::threadblock::CuSyncGemmIdentityThreadblockSwizzle<>, 
                                                     2, 8, 8, splitK> {};
@@ -220,22 +228,22 @@ class CuSyncBColumnMajorGemm : public cutlass::gemm::device::CuSyncGemm<CuStage,
                                                      ElementInputB, LayoutK,
                                                      ElementOutput, LayoutOutput,
                                                      ElementAccumulator, MMAOp,
-                                                     SmArch, ShapeMMAThreadBlock,
-                                                     ShapeMMAWarp, ShapeMMAOp,
+                                                     SmArch, TileSizeAttention::ShapeMMAThreadBlock,
+                                                     TileSizeAttention::ShapeMMAWarp, ShapeMMAOp,
                                                      EpilogueOp,
                                                      cutlass::gemm::threadblock::CuSyncGemmIdentityThreadblockSwizzle<>,
                                                      2, 8, 8, splitK> {};
 
 // CuSync GeMMs
-using XQKVCuSyncGemm = CuSyncAttentionGemm<XQKVCuStage, false>;
+using XQKVCuSyncGemm = CuSyncLinearLayerGemm<XQKVCuStage, TileSizeLinearLayers, false>;
 using SCuSyncGemm = CuSyncBColumnMajorGemm<SCuStage, false>;
-using OCuSyncGemm = CuSyncAttentionGemm<OCuStage, false>;
-using XW12CuSyncGemm = CuSyncAttentionGemm<XW12CuStage, false>;
+using OCuSyncGemm = CuSyncLinearLayerGemm<OCuStage, TileSizeAttention, false>;
+using XW12CuSyncGemm = CuSyncLinearLayerGemm<XW12CuStage, TileSizeLinearLayers, false>;
 
-using XQKVCuSyncGemmSplitK = CuSyncAttentionGemm<XQKVCuStage, true>;
+using XQKVCuSyncGemmSplitK = CuSyncLinearLayerGemm<XQKVCuStage, TileSizeLinearLayers, true>;
 using SCuSyncGemmSplitK = CuSyncBColumnMajorGemm<SCuStage, true>;
-using OCuSyncGemmSplitK = CuSyncAttentionGemm<OCuStage, true>;
-using XW12CuSyncGemmSplitK = CuSyncAttentionGemm<XW12CuStage, true>;
+using OCuSyncGemmSplitK = CuSyncLinearLayerGemm<OCuStage, TileSizeAttention, true>;
+using XW12CuSyncGemmSplitK = CuSyncLinearLayerGemm<XW12CuStage, TileSizeLinearLayers, true>;
 
 using HostTensor = cutlass::HostTensor<ElementInputA, LayoutInputA>;
 
@@ -707,13 +715,13 @@ cudaError_t runAttentionBaseline(int split_k1, int split_k2, int split_k3, int s
                                  int iters = 100) {
   cudaError_t result;
   if (split_k1 == 1 && split_k4 == 1) {
-    result = runAttentionBaseline<Gemm1, BColumnMajorGemmSplitK1, Gemm1, Gemm1>(split_k1, split_k2, split_k3, split_k4, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
+    result = runAttentionBaseline<LinearLayerGemm, AttnColumnMajorGemmSplitK1, AttnGemm2SplitK, LinearLayerGemm>(split_k1, split_k2, split_k3, split_k4, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
   } else if (split_k1 > 1 && split_k4 == 1) {
-     result = runAttentionBaseline<GemmSplitK1, BColumnMajorGemmSplitK1, Gemm1, Gemm1>(split_k1, split_k2, split_k3, split_k4, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
+     result = runAttentionBaseline<LinearLayerGemmSplitK, AttnColumnMajorGemmSplitK1, AttnGemm2SplitK, LinearLayerGemm>(split_k1, split_k2, split_k3, split_k4, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
   } else if (split_k1 == 1 && split_k4 > 1) {
-    result = runAttentionBaseline<Gemm1, BColumnMajorGemmSplitK1, Gemm1, GemmSplitK1>(split_k1, split_k2, split_k3, split_k4, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
+    result = runAttentionBaseline<LinearLayerGemm, AttnColumnMajorGemmSplitK1, AttnGemm2SplitK, LinearLayerGemmSplitK>(split_k1, split_k2, split_k3, split_k4, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
   } else if (split_k1 > 1 && split_k4 > 1) {
-    result = runAttentionBaseline<GemmSplitK1, BColumnMajorGemmSplitK1, Gemm1, GemmSplitK1>(split_k1, split_k2, split_k3, split_k4, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
+    result = runAttentionBaseline<LinearLayerGemmSplitK, AttnColumnMajorGemmSplitK1, AttnGemm2SplitK, LinearLayerGemmSplitK>(split_k1, split_k2, split_k3, split_k4, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
   }
 
   return result;
@@ -1027,19 +1035,19 @@ int run(int argc, char* argv[]) {
   
   attnParams.initOuts();
 
-  dim3 gridDim1 = {(uint)DIVUP(attnParams.gemm_size_xqkv.m(), ShapeMMAThreadBlock::kM),
-                   (uint)DIVUP(attnParams.gemm_size_xqkv.n(), ShapeMMAThreadBlock::kN),
+  dim3 gridDim1 = {(uint)DIVUP(attnParams.gemm_size_xqkv.m(), TileSizeLinearLayers::ShapeMMAThreadBlock::kM),
+                   (uint)DIVUP(attnParams.gemm_size_xqkv.n(), TileSizeLinearLayers::ShapeMMAThreadBlock::kN),
                    split_k1};
-  dim3 gridDim2 = {(uint)DIVUP(attnParams.gemm_size_s.m(), ShapeMMAThreadBlock::kM),
-                   (uint)DIVUP(attnParams.gemm_size_s.n(), ShapeMMAThreadBlock::kN),
+  dim3 gridDim2 = {(uint)DIVUP(attnParams.gemm_size_s.m(), TileSizeAttention::ShapeMMAThreadBlock::kM),
+                   (uint)DIVUP(attnParams.gemm_size_s.n(), TileSizeAttention::ShapeMMAThreadBlock::kN),
                    split_k2};
-  dim3 gridDim3 = {(uint)DIVUP(attnParams.gemm_size_o.m(), ShapeMMAThreadBlock::kM), 
-                   (uint)DIVUP(attnParams.gemm_size_o.n(), ShapeMMAThreadBlock::kN),
+  dim3 gridDim3 = {(uint)DIVUP(attnParams.gemm_size_o.m(), TileSizeAttention::ShapeMMAThreadBlock::kM), 
+                   (uint)DIVUP(attnParams.gemm_size_o.n(), TileSizeAttention::ShapeMMAThreadBlock::kN),
                    split_k3};
-  dim3 gridDim4 = {(uint)DIVUP(attnParams.gemm_size_xw12.m(), ShapeMMAThreadBlock::kM), 
-                   (uint)DIVUP(attnParams.gemm_size_xw12.n(), ShapeMMAThreadBlock::kN),
+  dim3 gridDim4 = {(uint)DIVUP(attnParams.gemm_size_xw12.m(), TileSizeLinearLayers::ShapeMMAThreadBlock::kM), 
+                   (uint)DIVUP(attnParams.gemm_size_xw12.n(), TileSizeLinearLayers::ShapeMMAThreadBlock::kN),
                    split_k4};
-  dim3 tileSize = {ShapeMMAThreadBlock::kM, ShapeMMAThreadBlock::kN, 1};
+  dim3 tileSize = {1,1,1};//{ShapeMMAThreadBlock::kM, ShapeMMAThreadBlock::kN, 1};
 
 #ifdef ROWSYNC
   using Sync1 = RowSync;
