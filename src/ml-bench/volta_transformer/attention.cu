@@ -32,29 +32,47 @@
 //<OPTIMIZATIONS>
 //</OPTIMIZATIONS>
 
-// #if defined(TILESYNC)
-// #define NO_ATOMIC_ADD
-// #endif
+#if defined(TILESYNC)
+#define NO_ATOMIC_ADD
+#endif
 
-// #if defined(TILESYNC) || defined(TILEBATCH) || defined(STRIDEDSYNC)
+#if defined(TILESYNC) || defined(STRIDEDSYNC)
 // #define AVOID_CUSTOM_ORDER
-// #define REORDER_TILE_LOADS
+#define REORDER_TILE_LOADS
 // #define AVOID_WAIT_KERNEL
-// #endif
+#endif
+
+// #define AVOID_CUSTOM_ORDER
+// #define AVOID_WAIT_KERNEL
 
 #include<cusync/cusync.h>
 
 #include "common.h"
 
+struct RowMajorZYX__1 {
+  size_t operator()(const dim3& grid, const dim3& tile) {
+    return tile.y + tile.z * grid.y + tile.x * grid.y * grid.z;
+  }
+};
+
 #ifndef EVAL_TILE_SIZES
 //Tile sizes of all GeMMs
-using ShapeMMAThreadBlock = cutlass::gemm::GemmShape<256, 128, 32>;  
+using ShapeMMAThreadBlock = cutlass::gemm::GemmShape<256, 128, 32>;
 using ShapeMMAWarp = cutlass::gemm::GemmShape<128, 64, 32>;
+
+struct TileSizeXW12 {
+  using ShapeMMAThreadBlock = cutlass::gemm::GemmShape<256, 128, 32>;
+  using ShapeMMAWarp = cutlass::gemm::GemmShape<128, 64, 32>;
+};
+struct TileSizeEpilogue {
+  using ShapeMMAThreadBlock = cutlass::gemm::GemmShape<256, 128, 32>;
+  using ShapeMMAWarp = cutlass::gemm::GemmShape<128, 64, 32>;
+};
 const int SoftmaxRowTile = 1;
 #else
 //<eval tiles>
 const int SoftmaxRowTile = 1;
-using ShapeMMAThreadBlock = cutlass::gemm::GemmShape<256, 128, 32>;  
+using ShapeMMAThreadBlock = cutlass::gemm::GemmShape<256, 128, 32>;
 using ShapeMMAWarp = cutlass::gemm::GemmShape<128, 64, 32>;
 //</eval tiles>
 #endif
@@ -87,9 +105,6 @@ const int SoftmaxThreads = ShapeMMAThreadBlock::kN;
 using ShapeMMAOp = cutlass::gemm::GemmShape<8, 8, 4>;  
 using namespace cusync;
 
-// #define AVOID_CUSTOM_ORDER
-// #define AVOID_WAIT_KERNEL
-
 const uint Opts = 
 #ifdef AVOID_CUSTOM_ORDER
   Optimizations::AvoidCustomOrder |
@@ -106,16 +121,16 @@ const uint Opts =
   Optimizations::NoOptimization;
 
 #ifdef ROWSYNC 
-  using XQKVCuStage = CuStage<CuStageType::Producer, RowMajorZYX, NoSync, RowSync, Opts>;
-  using SCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX, RowSync, RowSync, Opts | Optimizations::AvoidCustomOrder>;
-  using OCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX, RowSync, RowSync, Opts | Optimizations::AvoidCustomOrder>;
-  using XW12CuStage = CuStage<CuStageType::Consumer, RowMajorZYX, RowSync, NoSync, Opts>;
+  using XQKVCuStage = CuStage<CuStageType::Producer, RowMajorZYX__1, NoSync, RowSync, Opts>;
+  using SCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX__1, RowSync, RowSync, Opts | Optimizations::AvoidCustomOrder>;
+  using OCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX__1, RowSync, RowSync, Opts | Optimizations::AvoidCustomOrder>;
+  using XW12CuStage = CuStage<CuStageType::Consumer, RowMajorZYX__1, RowSync, NoSync, Opts>;
   using Sync = RowSync;
 #elif defined(TILESYNC)
-  using XQKVCuStage = CuStage<CuStageType::Producer, RowMajorZYX, NoSync, TileSync, Opts>;
-  using SCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX, TileSync, TileSync, Opts | Optimizations::AvoidCustomOrder>;
-  using OCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX, TileSync, TileSync, Opts | Optimizations::AvoidCustomOrder>;
-  using XW12CuStage = CuStage<CuStageType::Consumer, RowMajorZYX, TileSync, NoSync, Opts>;
+  using XQKVCuStage = CuStage<CuStageType::Producer, RowMajorZYX__1, NoSync, TileSync, Opts>;
+  using SCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX__1, TileSync, TileSync, Opts | Optimizations::AvoidCustomOrder>;
+  using OCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX__1, TileSync, TileSync, Opts | Optimizations::AvoidCustomOrder>;
+  using XW12CuStage = CuStage<CuStageType::Consumer, RowMajorZYX__1, TileSync, NoSync, Opts>;
 #elif defined(STRIDEDSYNC)
   #if defined(GPT3)
     using StridedSyncImpl = StridedSync<12288, ShapeMMAThreadBlock::kN, 3>;
@@ -124,10 +139,10 @@ const uint Opts =
   #else
     #error "GPT3 or LLaMA"
   #endif
-  using XQKVCuStage = CuStage<CuStageType::Producer, RowMajorZYX, NoSync, StridedSyncImpl, Opts>;
-  using SCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX, StridedSyncImpl, TileSync, Opts | Optimizations::AvoidCustomOrder>;
-  using OCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX, TileSync, TileSync, Opts | Optimizations::AvoidCustomOrder>;
-  using XW12CuStage = CuStage<CuStageType::Consumer, RowMajorZYX, TileSync, NoSync, Opts>;
+  using XQKVCuStage = CuStage<CuStageType::Producer, RowMajorZYX__1, NoSync, StridedSyncImpl, Opts>;
+  using SCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX__1, StridedSyncImpl, TileSync, Opts | Optimizations::AvoidCustomOrder>;
+  using OCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX__1, TileSync, TileSync, Opts | Optimizations::AvoidCustomOrder>;
+  using XW12CuStage = CuStage<CuStageType::Consumer, RowMajorZYX__1, TileSync, NoSync, Opts>;
 #else
   #error "Unknown Synchronization"
 #endif 
@@ -235,14 +250,21 @@ struct AttentionParams {
   //P = softmax(S)
   //O = P * V
   //XW12 = O * W2  
+  std::string model;
+  int seqlen;
+  int hidden_dim;
+  int batch;
+
   HostTensor x;
   HostTensor qkv;
-  HostTensor xqkv;
+  HostTensor xqkv_storage;
   HostTensor s;
   HostTensor p;
   HostTensor o;
   HostTensor w2;
   HostTensor xw12;
+
+  cutlass::TensorRef<ElementInputA, LayoutInputA> xqkv;
 
   HostTensor ref_xqkv;
   HostTensor ref_s;
@@ -250,30 +272,39 @@ struct AttentionParams {
   HostTensor ref_o;
   HostTensor ref_xw12;
 
-  cutlass::gemm::GemmCoord gemm_size_xqkv, gemm_size_s, gemm_size_o, gemm_size_xw12;
+  cutlass::gemm::GemmCoord gemm_size_xqkv, gemm_size_s, gemm_size_o, gemm_size_xw12, size_xqkv_storage;
   curandState* randStates;
   bool refCheck;
   ElementComputeEpilogue alpha;
   ElementComputeEpilogue beta;
 
-  AttentionParams(int problem[4], bool check) {
-    gemm_size_xqkv = cutlass::gemm::GemmCoord(problem[0], problem[1] * 3, problem[2]);
-    gemm_size_s = cutlass::gemm::GemmCoord(problem[0], problem[0], problem[1]);
-    gemm_size_o = cutlass::gemm::GemmCoord(problem[0], problem[1], problem[0]);
-    gemm_size_xw12 = cutlass::gemm::GemmCoord(problem[0], problem[3], problem[1]);
+  AttentionParams(std::string model, int batch, int seqlen, int hidden_dim, bool check) {
+    this->model = model;
+    this->seqlen = seqlen;
+    this->hidden_dim = hidden_dim;
+    this->batch = batch;
+    int numGPUs = 8;
+    int model_parallel_H = hidden_dim/numGPUs;
+    gemm_size_xqkv = cutlass::gemm::GemmCoord(batch, model_parallel_H * 3, hidden_dim);
+    size_xqkv_storage = cutlass::gemm::GemmCoord(batch + seqlen, model_parallel_H * 3, hidden_dim);
+    gemm_size_s = cutlass::gemm::GemmCoord(batch, batch + seqlen, model_parallel_H);
+    gemm_size_o = cutlass::gemm::GemmCoord(batch, model_parallel_H, batch+seqlen);
+    gemm_size_xw12 = cutlass::gemm::GemmCoord(batch, hidden_dim, model_parallel_H);
     
     alpha = ElementComputeEpilogue(1);
     beta = ElementComputeEpilogue(0);
   
     x    = HostTensor(gemm_size_xqkv.mk());
     qkv  = HostTensor(gemm_size_xqkv.kn());
-    xqkv = HostTensor(gemm_size_xqkv.mn());
+    xqkv_storage = HostTensor(size_xqkv_storage.mn());
     s = HostTensor(gemm_size_s.mn());
     o = HostTensor(gemm_size_o.mn());
     w2   = HostTensor(gemm_size_xw12.kn());
     xw12 = HostTensor(gemm_size_xw12.mn());
 
-    ref_xqkv = HostTensor(gemm_size_xqkv.mn());
+    xqkv = {xqkv_storage.device_data() + seqlen*model_parallel_H, LayoutInputA()};
+
+    ref_xqkv = HostTensor(size_xqkv_storage.mn());
     ref_s = HostTensor(gemm_size_s.mn());
     ref_o = HostTensor(gemm_size_o.mn());
     ref_xw12 = HostTensor(gemm_size_xw12.mn());
@@ -310,7 +341,7 @@ struct AttentionParams {
 
   void initOuts() {
     //Zeros all output tensors
-    cutlass::reference::host::TensorFill(xqkv.host_view());
+    cutlass::reference::host::TensorFill(xqkv_storage.host_view());
     cutlass::reference::host::TensorFill(s.host_view());
     cutlass::reference::host::TensorFill(p.host_view());
     cutlass::reference::host::TensorFill(o.host_view());
@@ -484,11 +515,15 @@ cudaError_t host_attention(AttentionParams& attnParams) {
 }
 
 cudaError_t check_results(AttentionParams& attnParams) {
-  attnParams.xqkv.sync_host();
+  if (attnParams.model == "gpt3") {
+    printf("No point in checking for GPT-3 because fp16 elements will overflow. Check with llama.\n");
+    return cudaSuccess;
+  }
+  attnParams.xqkv_storage.sync_host();
   printf("Checking XQKV=X*QKV\n");
   bool eq = equals(attnParams.ref_xqkv.size(), 
                    attnParams.ref_xqkv.host_data(), 
-                   attnParams.xqkv.host_data(), 1e-1f);
+                   attnParams.xqkv_storage.host_data(), 1e-1f);
   if (eq == false) {
     printf("not correct\n");
     return cudaErrorUnknown;
@@ -540,8 +575,7 @@ cudaError_t runAttentionBaseline(int split_k1, int split_k2, int split_k3, int s
   typename GemmTy1::Arguments args1{attnParams.gemm_size_xqkv,
                                     attnParams.x.device_ref(),
                                     attnParams.qkv.device_ref(),
-                                    attnParams.xqkv.device_ref(),
-                                    attnParams.xqkv.device_ref(),
+                                    attnParams.xqkv, attnParams.xqkv,
                                     {attnParams.alpha, attnParams.beta},
                                     split_k1};
   size_t workspace_size = GemmTy1::get_workspace_size(args1);
@@ -554,9 +588,9 @@ cudaError_t runAttentionBaseline(int split_k1, int split_k2, int split_k3, int s
 
   size_t N = attnParams.gemm_size_xqkv.n()/3;
 
-  ElementOutput* device_xq = attnParams.xqkv.device_data() + 0;
+  ElementOutput* device_xq = attnParams.xqkv_storage.device_data() + 0;
   cutlass::TensorRef xq{device_xq, LayoutInputA(3*N)}; 
-  ElementOutput* device_xk = attnParams.xqkv.device_data() + N;
+  ElementOutput* device_xk = attnParams.xqkv_storage.device_data() + N;
   cutlass::TensorRef xk{device_xk, LayoutK(3*N)};
 
   //Setup S=Q*K.T GeMM
@@ -574,7 +608,7 @@ cudaError_t runAttentionBaseline(int split_k1, int split_k2, int split_k3, int s
   status = gemm_op2.initialize(args2, workspace2.get());
   CUTLASS_CHECK(status);
 
-  ElementOutput* device_xv = attnParams.xqkv.device_data() + N;
+  ElementInputA* device_xv = attnParams.xqkv_storage.device_data() + N;
   cutlass::TensorRef xv{device_xv, LayoutInputB(3*N)};
 
   //Setup O=S*V GeMM
@@ -663,13 +697,13 @@ cudaError_t runAttentionBaseline(int split_k1, int split_k2, int split_k3, int s
                                  int iters = 100) {
   cudaError_t result;
   if (split_k1 == 1 && split_k4 == 1) {
-    result = runAttentionBaseline<Gemm1, BColumnMajorGemmSplitK1, GemmSplitK1, Gemm1>(split_k1, split_k2, split_k3, split_k4, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
+    result = runAttentionBaseline<Gemm1, BColumnMajorGemmSplitK1, Gemm1, Gemm1>(split_k1, split_k2, split_k3, split_k4, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
   } else if (split_k1 > 1 && split_k4 == 1) {
-     result = runAttentionBaseline<GemmSplitK1, BColumnMajorGemmSplitK1, GemmSplitK1, Gemm1>(split_k1, split_k2, split_k3, split_k4, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
+     result = runAttentionBaseline<GemmSplitK1, BColumnMajorGemmSplitK1, Gemm1, Gemm1>(split_k1, split_k2, split_k3, split_k4, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
   } else if (split_k1 == 1 && split_k4 > 1) {
-    result = runAttentionBaseline<Gemm1, BColumnMajorGemmSplitK1, GemmSplitK1, GemmSplitK1>(split_k1, split_k2, split_k3, split_k4, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
+    result = runAttentionBaseline<Gemm1, BColumnMajorGemmSplitK1, Gemm1, GemmSplitK1>(split_k1, split_k2, split_k3, split_k4, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
   } else if (split_k1 > 1 && split_k4 > 1) {
-    result = runAttentionBaseline<GemmSplitK1, BColumnMajorGemmSplitK1, GemmSplitK1, GemmSplitK1>(split_k1, split_k2, split_k3, split_k4, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
+    result = runAttentionBaseline<GemmSplitK1, BColumnMajorGemmSplitK1, Gemm1, GemmSplitK1>(split_k1, split_k2, split_k3, split_k4, attnParams, streams, execTime, matmul1Time, matmul2Time, matmul3Time, matmul4Time, iters);
   }
 
   return result;
@@ -682,7 +716,8 @@ cudaError_t runAttentionCuSync(int split_k1, int split_k2, int split_k3, int spl
                                XQKVCuStage& xqkvstage, SCuStage& scustage, OCuStage& ocustage, XW12CuStage& xw12custage,
                                cudaStream_t streams[],
                                double& execTime,
-                               int iters = 100) {  
+                               int iters = 100) {
+#if 0
   //Setup XQKV = X * QKV GeMM
   typename XQKVCuSyncGemmTy::Arguments args1{xqkvstage,
                                             attnParams.gemm_size_xqkv,
@@ -803,6 +838,7 @@ cudaError_t runAttentionCuSync(int split_k1, int split_k2, int split_k3, int spl
   }
 
   return cudaSuccess;
+#endif
 }
 
 cudaError_t runAttentionCuSync(int split_k1, int split_k2, int split_k3, int split_k4,
@@ -845,9 +881,9 @@ int run(int argc, char* argv[]) {
     // Return 0 so tests are considered passing if run on unsupported architectures or CUDA Toolkits.
     return 0;
   }
-  const uint NUM_ARGS = 7;
-  std::string argNames[NUM_ARGS] = {"--model", "--batch", "--check", "--split-k1", "--split-k2", "--split-k3", "--split-k4"};
-  std::string argHelp[NUM_ARGS] = {"GPT-3 or LLaMa", "Batch size", "Check results", 
+  const uint NUM_ARGS = 8;
+  std::string argNames[NUM_ARGS] = {"--model", "--batch", "--check", "--seqlen", "--split-k1", "--split-k2", "--split-k3", "--split-k4"};
+  std::string argHelp[NUM_ARGS] = {"GPT-3 or LLaMa", "Batch size", "Sequence Length", "Check results", 
                                    "Split K for XQKV = X*QKV GeMM", "Split K for P=Q*K.T GeMM",
                                    "Split K for O=P*V GeMM", "Split K for XW12=O*W12 GeMM"};
   
@@ -859,12 +895,14 @@ int run(int argc, char* argv[]) {
               << argNames[3] << " <int> " << argHelp[3] << std::endl
               << argNames[4] << " <int> " << argHelp[4] << std::endl
               << argNames[5] << " <int> " << argHelp[5] << std::endl
-              << argNames[6] << " <int> " << argHelp[6] << std::endl;
+              << argNames[6] << " <int> " << argHelp[6] << std::endl
+              << argNames[7] << " <int> " << argHelp[7] << std::endl;
     return 0;
   }
 
   std::string model = "";
   uint batch = 0;
+  uint seqlen = 0;
   bool doChecking = false;
   uint split_k1 = 1;
   uint split_k2 = 1;
@@ -892,15 +930,18 @@ int run(int argc, char* argv[]) {
       }
       i = i + 1;
     } else if (arg.find(argNames[3]) == 0) {
-      split_k1 = atoi(argv[i+1]);
+      seqlen = atoi(argv[i+1]);
       i=i+1;
     } else if (arg.find(argNames[4]) == 0) {
-      split_k2 = atoi(argv[i+1]);
+      split_k1 = atoi(argv[i+1]);
       i=i+1;
     } else if (arg.find(argNames[5]) == 0) {
-      split_k3 = atoi(argv[i+1]);
+      split_k2 = atoi(argv[i+1]);
       i=i+1;
     } else if (arg.find(argNames[6]) == 0) {
+      split_k3 = atoi(argv[i+1]);
+      i=i+1;
+    } else if (arg.find(argNames[7]) == 0) {
       split_k4 = atoi(argv[i+1]);
       i=i+1;
     }
@@ -911,18 +952,12 @@ int run(int argc, char* argv[]) {
     return 0;
   }
   
-  std::cout << "model=" << model << " batch=" << batch << " check="<<doChecking <<std::endl;
-  int problem[4] = {0,0,0,0};
-  problem[0] = batch;
-  
+  std::cout << "model=" << model << " batch=" << batch << " seqlen=" << seqlen <<  " check="<<doChecking <<std::endl;
+  int hidden_dim = 0;  
   if (model=="gpt3") {
-    problem[1] = 12288/8;
-    problem[2] = 12288;
-    problem[3] = 12288;
+    hidden_dim = 12288;
   } else if (model=="llama") {
-    problem[1] = 8192/8;
-    problem[2] = 8192;
-    problem[3] = 8192;
+    hidden_dim = 8192;
   }
 
   //
@@ -942,7 +977,7 @@ int run(int argc, char* argv[]) {
   }
   
   // Create and initialize attention tensors
-  AttentionParams attnParams(problem, doChecking);
+  AttentionParams attnParams(model, batch, seqlen, hidden_dim, doChecking);
   attnParams.initIns();
   attnParams.initOuts();
   attnParams.initRefs();
