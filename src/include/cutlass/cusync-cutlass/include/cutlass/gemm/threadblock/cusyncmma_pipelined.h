@@ -483,14 +483,7 @@ public:
       // Loop over GEMM K dimension
       //
       uint startK = (uint)tb_offset_A.column() + (total_gemm_k_iterations - gemm_k_iterations)*Shape::kK;
-      if (custage.isConsumer() && startK > Shape::kN && startK%Shape::kN == 0) {
-        dim3 tile = {(uint)tb_offset_A.row()/Shape::kM, startK/Shape::kN, 0};
-        #ifdef REORDER_TILE_LOADS
-          custage.wait(tile, 0, false);
-        #else
-          custage.wait(tile, 0, true);
-        #endif
-      }
+
 
       CUTLASS_PRAGMA_UNROLL
       for (int warp_mma_k = 0; warp_mma_k < Base::kWarpGemmIterations; ++warp_mma_k) {
@@ -528,11 +521,20 @@ public:
           iterator_B.load(tb_frag_B);
           ++iterator_B;
 
+        if (custage.isConsumer() && startK > Shape::kN && startK%Shape::kN == 0) {
+          dim3 tile = {(uint)tb_offset_A.row()/Shape::kM, startK/Shape::kN, 0};
+          custage.wait(tile, 0, true);          
+        }
+
           // Load fragment from global A
           tb_frag_A.clear();
           iterator_A.load(tb_frag_A);
           ++iterator_A;
         #else
+          if (custage.isConsumer() && startK > Shape::kN && startK%Shape::kN == 0) {
+            dim3 tile = {(uint)tb_offset_A.row()/Shape::kM, startK/Shape::kN, 0};
+            custage.wait(tile, 0, true);
+          }
           // Load fragment from global A
           tb_frag_A.clear();
           iterator_A.load(tb_frag_A);
@@ -571,14 +573,6 @@ public:
     const uint block_idx_x, const uint block_idx_y) {
     // The last kblock is loaded in the prolog
     uint startK = tb_offset_A.column();//(total_gemm_k_iterations - gemm_k_iterations)*Shape::kK;
-    if (custage.isConsumer()) {
-      dim3 tile = {(uint)tb_offset_A.row()/Shape::kM, startK/Shape::kN, 0};
-      #ifdef REORDER_TILE_LOADS
-      custage.wait(tile, 0, false);
-      #else
-      custage.wait(tile, 0, true);
-      #endif
-    }
     
     #ifdef REORDER_TILE_LOADS
     // Load B fragment from global B
@@ -588,6 +582,10 @@ public:
     ++iterator_B;
     this->smem_iterator_B_.store(transform_B_(tb_frag_B));
 
+    if (custage.isConsumer()) {
+      dim3 tile = {(uint)tb_offset_A.row()/Shape::kM, startK/Shape::kN, 0};
+      custage.wait(tile, 0, true);
+    }
     // Load A fragment from global A
     FragmentA tb_frag_A;
     tb_frag_A.clear();
@@ -598,6 +596,10 @@ public:
     this->smem_iterator_A_.store(transform_A_(tb_frag_A));
     
     #else
+    if (custage.isConsumer()) {
+      dim3 tile = {(uint)tb_offset_A.row()/Shape::kM, startK/Shape::kN, 0};
+      custage.wait(tile, 0, true);
+    }
     // Load A fragment from global A
     FragmentA tb_frag_A;
     tb_frag_A.clear();

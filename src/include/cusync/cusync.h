@@ -211,6 +211,7 @@ public:
   void wait(dim3& tile, uint waitingThread = 0, bool callSync = true) {
     if (std::is_same<ProdSync, NoSync>::value) return;
     if (!isConsumer()) return;
+    // if (threadIdx.x == 0) printf("214 {%d, %d, %d}\n", tile.x, tile.y, tile.z);
     if (!prodSyncPolicy_.isSync(tile, prodGrid_)) return;
     // if (prodGrid_.y == grid_.y) return;
     if (threadIdx.x == waitingThread && threadIdx.y == 0 && threadIdx.z == 0) {
@@ -220,8 +221,12 @@ public:
       uint w = prodSyncPolicy_.waitValue(tile, prodGrid_);
       uint idx = prodSyncPolicy_.tileIndex(tile, prodGrid_);
       auto v = globalLoad(&tileStatusRead_[idx]);
+      // printf("224 val %d {%d, %d, %d} iter %d idx %d w %d prodGrid {%d, %d, %d}\n", 
+      //         v, tile.x, tile.y, tile.z, iter, idx, w, prodGrid_.x, prodGrid_.y, prodGrid_.z);
+
       while(v < iter * w) {
         v = globalVolatileLoad(&tileStatusRead_[idx]);
+        // printf("225 val %d {%d, %d, %d} iter %d idx %d prodGrid {%d, %d, %d}\n", v, tile.x, tile.y, tile.z, iter, idx, prodGrid_.x, prodGrid_.y, prodGrid_.z);
       }
     }
 
@@ -257,6 +262,9 @@ public:
       __threadfence_system();
       uint idx = consSyncPolicy_.tileIndex(tile, grid_);
       if (!getNoAtomicAdd()) {
+        // printf("264 {%d, %d, %d} iter %d idx %d {%d, %d, %d} grid_ {%d, %d, %d}\n",
+        //        tile.x, tile.y, tile.z, iter, idx, gridDim.x, gridDim.y, gridDim.z,
+        //        grid_.x, grid_.y, grid_.z);
         atomicAdd((int*)&tileStatusWrite_[idx],
                   consSyncPolicy_.postValue(tile, grid_));
       } else {

@@ -44,7 +44,7 @@
 
 //Always AVOID for batch <= 512
 
-#define AVOID_CUSTOM_ORDER
+// #define AVOID_CUSTOM_ORDER
 // #define AVOID_WAIT_KERNEL
 
 #include<cusync/cusync.h>
@@ -123,8 +123,8 @@ const uint Opts =
 
 #ifdef ROWSYNC 
   using XQKVCuStage = CuStage<CuStageType::Producer, RowMajorZYX__1, NoSync, RowSync, Opts>;
-  using SCuStage = CuStage<CuStageType::Consumer, RowMajorZYX__1, RowSync, NoSync, Opts | Optimizations::AvoidCustomOrder>;
-  using OCuStage = CuStage<CuStageType::Producer, RowMajorZYX__1, NoSync, RowSync, Opts | Optimizations::AvoidCustomOrder>;
+  using SCuStage = CuStage<CuStageType::Consumer | CuStageType::Producer, RowMajorZYX__1, RowSync, RowSync, Opts | Optimizations::AvoidCustomOrder>;
+  using OCuStage = CuStage<CuStageType::Producer | CuStageType::Consumer, RowMajorZYX__1, RowSync, RowSync, Opts | Optimizations::AvoidCustomOrder>;
   using XW12CuStage = CuStage<CuStageType::Consumer, RowMajorZYX__1, RowSync, NoSync, Opts>;
   using Sync = RowSync;
 #elif defined(TILESYNC)
@@ -682,14 +682,14 @@ cudaError_t runAttentionBaseline(int split_k1, int split_k2, int split_k3, int s
     double iterMatmul2 = middle2-middle1;
     matmul2Time += iterMatmul2;
     
-    status = gemm_op3(streams[0]);
+    // status = gemm_op3(streams[0]);
     CUTLASS_CHECK(status);
     CUDA_CHECK(cudaDeviceSynchronize());
     double middle3 = timeInMicroSeconds();
     double iterMatmul3 = middle3-middle2;
     matmul3Time += iterMatmul3;
 
-    status = gemm_op4(streams[0]);
+    // status = gemm_op4(streams[0]);
     CUTLASS_CHECK(status);
     CUDA_CHECK(cudaDeviceSynchronize());
     double middle4 = timeInMicroSeconds();
@@ -825,12 +825,11 @@ cudaError_t runAttentionCuSync(int split_k1, int split_k2, int split_k3, int spl
     CUTLASS_CHECK(status);
     
     // double e = timeInMicroSeconds();
-    // if (iters > 10) printf("%f\n", (e-start));
-    CUDA_CHECK(cudaStreamSynchronize(streams[1]));
-    scustage.invokeWaitKernel(streams[2]);
-    status = gemm_op3.run(true, NULL, streams[2]);
-    // CUTLASS_CHECK(status);
-    // CUDA_CHECK(cudaStreamSynchronize(streams[2]));
+    // // if (iters > 10) printf("%f\n", (e-start));
+    // scustage.invokeWaitKernel(streams[2]);
+    // status = gemm_op3.run(true, NULL, streams[2]);
+    // // CUTLASS_CHECK(status);
+    // // CUDA_CHECK(cudaStreamSynchronize(streams[2]));
     // ocustage.invokeWaitKernel(streams[3]);
     // status = gemm_op4.run(true, NULL, streams[3]);
     // CUTLASS_CHECK(status);
@@ -1056,10 +1055,10 @@ int run(int argc, char* argv[]) {
 
 #ifdef ROWSYNC
   using Sync1 = RowSync;
-  RowSync sync1(gridDim1.y);
-  RowSync sync2(gridDim2.y);
-  RowSync sync3(gridDim3.y);
-  RowSync sync4(gridDim4.y);
+  RowSync sync1(gridDim1.x/3);
+  RowSync sync2(gridDim2.x);
+  RowSync sync3(gridDim3.x);
+  RowSync sync4(gridDim4.x);
 #elif defined(TILESYNC)
   TileSync sync1(1,1), sync2(1,1), sync3(1,1), sync4(1,1);
 #elif defined(STRIDEDSYNC)

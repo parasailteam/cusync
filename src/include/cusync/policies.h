@@ -67,7 +67,10 @@ public:
    * Returns the tile index as the x index of tile
    */
   __device__ uint tileIndex(const dim3& tile, const dim3& grid) {
-    return tile.x;
+    if (grid.x == 24)
+      return tile.x * (grid.x/8) + tile.y/8;
+    else
+      return tile.x;
   }
 
   /*
