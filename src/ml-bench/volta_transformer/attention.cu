@@ -59,8 +59,8 @@ struct RowMajorZYX__1 {
 
 #ifndef EVAL_TILE_SIZES
 //Tile sizes of all GeMMs
-typedef cutlass::gemm::GemmShape<256, 128, 32> ShapeMMAThreadBlock;
-typedef cutlass::gemm::GemmShape<128, 64, 32> ShapeMMAWarp;
+typedef cutlass::gemm::GemmShape<32, 128, 32> ShapeMMAThreadBlock;
+typedef cutlass::gemm::GemmShape<32, 32, 32> ShapeMMAWarp;
 const int SoftmaxRowTile = 1;
 // using ShapeMMAThreadBlock = cutlass::gemm::GemmShape<256, 128, 32>;
 // using ShapeMMAWarp = cutlass::gemm::GemmShape<128, 64, 32>;
