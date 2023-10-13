@@ -634,6 +634,28 @@ elif model == "llama" and attention_or_mlp == "attention":
     }
   }
 
+#LLAMA Attention
+# (current RowSync code that synchronizes 8 tiles together: 
+# if (grid.x == 24)
+#      return tile.x * (grid.x/8) + tile.y/8;
+#    else
+#      return tile.x;
+# )
+# SEQ=0              CuSync                       Baseline
+#   B=2048: 256,128,32x128,64,32, 2,1,1,1          -----
+#   B=1024: 256,128,32x128,64,32, 3,1,1,1          -----
+#   B=512:  128,128,32x64,64,32 , 3,2,1,1          -----
+#   B=256:  128,128,32x64,64,32 , 6,3,1,1 (280)   3,3,1,1       
+# SEQ=1023
+#   B=1   : 32,128,32,32,64,32    6,3,2,2 
+#   B=4   : ^^^^^^^^^^^^^
+# SEQ=2047
+#   B=1   : 32,128,32,32,64,32    6,3,3,2
+#   B=4   : 
+# SEQ=4095 
+#   B=1   :  32,128,32,32,64,32   4,3,3,2
+#   B=4   : 
+
 if model.lower() == "BLOOM".lower():
   H = 14336
   FFN = 4*H/8

@@ -484,7 +484,6 @@ public:
       //
       uint startK = (uint)tb_offset_A.column() + (total_gemm_k_iterations - gemm_k_iterations)*Shape::kK;
 
-
       CUTLASS_PRAGMA_UNROLL
       for (int warp_mma_k = 0; warp_mma_k < Base::kWarpGemmIterations; ++warp_mma_k) {
 
@@ -520,11 +519,11 @@ public:
           tb_frag_B.clear();
           iterator_B.load(tb_frag_B);
           ++iterator_B;
-
-        if (custage.isConsumer() && startK > Shape::kN && startK%Shape::kN == 0) {
-          dim3 tile = {(uint)tb_offset_A.row()/Shape::kM, startK/Shape::kN, 0};
-          custage.wait(tile, 0, true);          
-        }
+          if (custage.isConsumer() && startK > Shape::kN && startK%Shape::kN == 0) {
+            __syncthreads();
+            dim3 tile = {(uint)tb_offset_A.row()/Shape::kM, startK/Shape::kN, 0};
+            custage.wait(tile, 0, true);
+          }
 
           // Load fragment from global A
           tb_frag_A.clear();
@@ -583,9 +582,11 @@ public:
     this->smem_iterator_B_.store(transform_B_(tb_frag_B));
 
     if (custage.isConsumer()) {
+      __syncthreads();
       dim3 tile = {(uint)tb_offset_A.row()/Shape::kM, startK/Shape::kN, 0};
       custage.wait(tile, 0, true);
     }
+
     // Load A fragment from global A
     FragmentA tb_frag_A;
     tb_frag_A.clear();

@@ -33,7 +33,7 @@
 //</OPTIMIZATIONS>
 
 #if defined(TILESYNC)
-#define NO_ATOMIC_ADD
+// #define NO_ATOMIC_ADD
 #endif
 
 #if defined(TILESYNC) || defined(STRIDEDSYNC)
@@ -60,12 +60,12 @@ struct RowMajorZYX__1 {
 #ifndef EVAL_TILE_SIZES
 //Tile sizes of all GeMMs
 struct TileSizeLinearLayers {
-  typedef cutlass::gemm::GemmShape<256, 128, 32> ShapeMMAThreadBlock;
-  typedef cutlass::gemm::GemmShape<128, 64, 32> ShapeMMAWarp;
+  typedef cutlass::gemm::GemmShape<32, 128, 32> ShapeMMAThreadBlock;
+  typedef cutlass::gemm::GemmShape<32, 64, 32> ShapeMMAWarp;
 };
 struct TileSizeAttention {
-  typedef cutlass::gemm::GemmShape<256, 128, 32> ShapeMMAThreadBlock;
-  typedef cutlass::gemm::GemmShape<128, 64, 32> ShapeMMAWarp;
+  typedef cutlass::gemm::GemmShape<32, 128, 32> ShapeMMAThreadBlock;
+  typedef cutlass::gemm::GemmShape<32, 64, 32> ShapeMMAWarp;
 };
 const int SoftmaxRowTile = 1;
 // using ShapeMMAThreadBlock = cutlass::gemm::GemmShape<256, 128, 32>;
@@ -129,8 +129,8 @@ const uint Opts =
   using Sync = RowSync;
 #elif defined(TILESYNC)
   using XQKVCuStage = CuStage<CuStageType::Producer, RowMajorZYX__1, NoSync, TileSync, Opts>;
-  using SCuStage = CuStage<CuStageType::Consumer | CuStageType::Producer, RowMajorZYX__1, TileSync, TileSync, Opts | Optimizations::AvoidCustomOrder>;
-  using OCuStage = CuStage<CuStageType::Consumer | CuStageType::Producer, RowMajorZYX__1, TileSync, TileSync, Opts | Optimizations::AvoidCustomOrder>;
+  using SCuStage = CuStage<CuStageType::Consumer | CuStageType::Producer, RowMajorZYX__1, TileSync, TileSync, Opts>;
+  using OCuStage = CuStage<CuStageType::Consumer | CuStageType::Producer, RowMajorZYX__1, TileSync, TileSync, Opts>;
   using XW12CuStage = CuStage<CuStageType::Consumer, RowMajorZYX__1, TileSync, NoSync, Opts>;
 #elif defined(STRIDEDSYNC)
   #if defined(GPT3)
@@ -682,14 +682,14 @@ cudaError_t runAttentionBaseline(int split_k1, int split_k2, int split_k3, int s
     double iterMatmul2 = middle2-middle1;
     matmul2Time += iterMatmul2;
     
-    // status = gemm_op3(streams[0]);
+    status = gemm_op3(streams[0]);
     CUTLASS_CHECK(status);
     CUDA_CHECK(cudaDeviceSynchronize());
     double middle3 = timeInMicroSeconds();
     double iterMatmul3 = middle3-middle2;
     matmul3Time += iterMatmul3;
 
-    // status = gemm_op4(streams[0]);
+    status = gemm_op4(streams[0]);
     CUTLASS_CHECK(status);
     CUDA_CHECK(cudaDeviceSynchronize());
     double middle4 = timeInMicroSeconds();
@@ -826,13 +826,13 @@ cudaError_t runAttentionCuSync(int split_k1, int split_k2, int split_k3, int spl
     
     // double e = timeInMicroSeconds();
     // // if (iters > 10) printf("%f\n", (e-start));
-    // scustage.invokeWaitKernel(streams[2]);
-    // status = gemm_op3.run(true, NULL, streams[2]);
-    // // CUTLASS_CHECK(status);
+    scustage.invokeWaitKernel(streams[2]);
+    status = gemm_op3.run(true, NULL, streams[2]);
+    CUTLASS_CHECK(status);
     // // CUDA_CHECK(cudaStreamSynchronize(streams[2]));
-    // ocustage.invokeWaitKernel(streams[3]);
-    // status = gemm_op4.run(true, NULL, streams[3]);
-    // CUTLASS_CHECK(status);
+    ocustage.invokeWaitKernel(streams[3]);
+    status = gemm_op4.run(true, NULL, streams[3]);
+    CUTLASS_CHECK(status);
 
     CUDA_CHECK(cudaDeviceSynchronize());
     double end = timeInMicroSeconds();
