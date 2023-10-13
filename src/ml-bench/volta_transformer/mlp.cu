@@ -69,14 +69,14 @@ const uint Opts =
   Optimizations::NoOptimization;
 
 #ifdef ROWSYNC
-  using ProdCuStage = CuStage<CuStageType::Producer, RowMajorZYX, RowSync, Opts>;
-  using MiddleCuStage = CuStage<CuStageType::Producer | CuStageType::Consumer, RowMajorZYX, RowSync, Opts>;
-  using ConsCuStage = CuStage<CuStageType::Consumer, RowMajorZYX, RowSync, Opts>;
+  using ProdCuStage = CuStage<CuStageType::Producer, RowMajorZYX, NoSync, RowSync, Opts>;
+  using MiddleCuStage = CuStage<CuStageType::Producer | CuStageType::Consumer, RowMajorZYX, RowSync, RowSync, Opts>;
+  using ConsCuStage = CuStage<CuStageType::Consumer, RowMajorZYX, RowSync, NoSync, Opts>;
   using Sync = RowSync;
 #elif defined(TILESYNC)
-  using ProdCuStage = CuStage<CuStageType::Producer, RowMajorZYX, TileSync, Opts>;
-  using MiddleCuStage = CuStage<CuStageType::Producer | CuStageType::Consumer, RowMajorZYX, TileSync, Opts>;
-  using ConsCuStage = CuStage<CuStageType::Consumer, RowMajorZYX, TileSync, Opts>;
+  using ProdCuStage = CuStage<CuStageType::Producer, RowMajorZYX, NoSync, TileSync, Opts>;
+  using MiddleCuStage = CuStage<CuStageType::Producer | CuStageType::Consumer, RowMajorZYX, TileSync, TileSync, Opts>;
+  using ConsCuStage = CuStage<CuStageType::Consumer, RowMajorZYX, TileSync, NoSync, Opts>;
   using Sync = TileSync;
 #else
   #error "Unknown Synchronization"
@@ -389,7 +389,7 @@ cudaError_t checkMLPResults(MLPParameters& mlpParams) {
 template<typename GemmTy1, typename GemmTy2>
 cudaError_t runBaselineGPT3(int split_k1, int split_k2, 
                             MLPParameters& mlpParams,
-                            cudaStream_t stream,
+                            cudaStream_t streams[],
                             double& execTime, double& matmul1Time, double& softmaxTime, double& matmul2Time,
                             int iters = 100) {
   //Setup first GeMM
@@ -433,13 +433,13 @@ cudaError_t runBaselineGPT3(int split_k1, int split_k2,
   //Run kernels
   for (int r = 0; r < iters; r++) {    
     double start = timeInMicroSeconds();
-    status = gemm_op1(args1, workspace1.get(), stream);
+    status = gemm_op1(args1, workspace1.get(), streams[0]);
     CUTLASS_CHECK(status);
-    CUDA_CHECK(cudaStreamSynchronize(stream));
+    CUDA_CHECK(cudaStreamSynchronize(streams[0]));
     double middle1 = timeInMicroSeconds();
     double iterMatMul1 = middle1-start;
     matmul1Time += iterMatMul1;
-    status = gemm_op2(args2, workspace2.get(), stream);
+    status = gemm_op2(args2, workspace2.get(), streams[0]);
     CUTLASS_CHECK(status);
     CUDA_CHECK(cudaDeviceSynchronize());
     double middle3 = timeInMicroSeconds();
@@ -456,7 +456,7 @@ cudaError_t runBaselineGPT3(int split_k1, int split_k2,
 
 cudaError_t runBaselineGPT3(int split_k1, int split_k2, 
                         MLPParameters& mlpParams,
-                        cudaStream_t stream,
+                        cudaStream_t streams[],
                         double& execTime,
                         double& matmul1Time,
                         double& softmaxTime,
@@ -468,13 +468,13 @@ cudaError_t runBaselineGPT3(int split_k1, int split_k2,
   softmaxTime = 0;
   matmul2Time = 0;
   if (split_k1 == 1 && split_k2 == 1) {
-    result = runBaselineGPT3<Gemm1, Gemm2>(split_k1, split_k2, mlpParams, stream, execTime, matmul1Time, softmaxTime, matmul2Time, iters);
+    result = runBaselineGPT3<Gemm1, Gemm2>(split_k1, split_k2, mlpParams, streams, execTime, matmul1Time, softmaxTime, matmul2Time, iters);
   } else if (split_k1 > 1 && split_k2 == 1) {
-    result = runBaselineGPT3<GemmSplitK1, Gemm2>(split_k1, split_k2, mlpParams, stream, execTime, matmul1Time, softmaxTime, matmul2Time, iters);
+    result = runBaselineGPT3<GemmSplitK1, Gemm2>(split_k1, split_k2, mlpParams, streams, execTime, matmul1Time, softmaxTime, matmul2Time, iters);
   } else if (split_k1 == 1 && split_k2 > 1) {
-    result = runBaselineGPT3<Gemm1, GemmSplitK2>(split_k1, split_k2, mlpParams, stream, execTime, matmul1Time, softmaxTime, matmul2Time, iters);
+    result = runBaselineGPT3<Gemm1, GemmSplitK2>(split_k1, split_k2, mlpParams, streams, execTime, matmul1Time, softmaxTime, matmul2Time, iters);
   } else {
-    result = runBaselineGPT3<GemmSplitK1, GemmSplitK2>(split_k1, split_k2, mlpParams, stream, execTime, matmul1Time, softmaxTime, matmul2Time, iters);
+    result = runBaselineGPT3<GemmSplitK1, GemmSplitK2>(split_k1, split_k2, mlpParams, streams, execTime, matmul1Time, softmaxTime, matmul2Time, iters);
   }
 
   return result;
@@ -885,6 +885,15 @@ int run(int argc, char* argv[]) {
   CUDA_CHECK(cudaStreamCreate(&producer_stream2));
   CUDA_CHECK(cudaStreamCreate(&consumer_stream));
 
+  int highestPriority;
+  int lowestPriority;
+  CUDA_CHECK(cudaDeviceGetStreamPriorityRange(&lowestPriority, &highestPriority));
+  CUDA_CHECK(cudaStreamCreateWithPriority(&consumer_stream, 0, lowestPriority));
+  cudaStream_t streams[(lowestPriority - highestPriority + 1)];
+  for (int i = highestPriority; i <= lowestPriority; i++) {
+    CUDA_CHECK(cudaStreamCreateWithPriority(&streams[i - highestPriority], 0, i));
+  }
+
   MLPParameters mlpParams(model, batch, doChecking);
   mlpParams.initIns();
   mlpParams.initOuts();
@@ -909,7 +918,7 @@ int run(int argc, char* argv[]) {
   double matmul2Time = 0;
 
   if (mlpParams.isGPT3()) {
-    result = runBaselineGPT3(split_k1, split_k2, mlpParams, producer_stream, 
+    result = runBaselineGPT3(split_k1, split_k2, mlpParams, streams, 
                              baselineTime, matmul1Time, softmaxTime, matmul2Time, 1);
 
     CUDA_CHECK(cudaDeviceSynchronize());
@@ -921,12 +930,12 @@ int run(int argc, char* argv[]) {
       }
     }
 
-    result = runBaselineGPT3(split_k1, split_k2, mlpParams, producer_stream, 
+    result = runBaselineGPT3(split_k1, split_k2, mlpParams, streams,
                              baselineTime, matmul1Time, softmaxTime, matmul2Time, warmup);
 
     CUDA_CHECK(cudaDeviceSynchronize());
     printf("START-BASELINE:\n");
-    result = runBaselineGPT3(split_k1, split_k2, mlpParams, producer_stream, 
+    result = runBaselineGPT3(split_k1, split_k2, mlpParams, streams, 
                          baselineTime, matmul1Time, softmaxTime, matmul2Time, epochs);
     CUDA_CHECK(result);
     printf("END-BASELINE:\n");
@@ -985,20 +994,11 @@ int run(int argc, char* argv[]) {
 #else
   #error "Unknown Policy"
 #endif
-
-  int highestPriority;
-  int lowestPriority;
-  CUDA_CHECK(cudaDeviceGetStreamPriorityRange(&lowestPriority, &highestPriority));
-  CUDA_CHECK(cudaStreamCreateWithPriority(&consumer_stream, 0, lowestPriority));
-  cudaStream_t streams[(lowestPriority - highestPriority + 1)];
-  for (int i = highestPriority; i <= lowestPriority; i++) {
-    CUDA_CHECK(cudaStreamCreateWithPriority(&streams[i - highestPriority], 0, i));
-  }
   
   //Run cusync mlp
   if (mlpParams.isGPT3()) {
-    ProdCuStage prod(gridDim1, tileSize, sync);
-    ConsCuStage cons(gridDim2, tileSize, sync);
+    ProdCuStage prod(gridDim1, tileSize, NoSync(), sync);
+    ConsCuStage cons(gridDim2, tileSize, sync, NoSync());
 
     CuSync::setProducerConsumerPair(prod, cons);
     
@@ -1036,10 +1036,10 @@ int run(int argc, char* argv[]) {
   #error "Unknown Policy"
 #endif
 
-    ProdCuStage prod(gridDim1, tileSize, sync);
+    ProdCuStage prod(gridDim1, tileSize, NoSync(), sync);
     dim3 gridMiddle = {(uint)DIVUP(mlpParams.gemm_size1.m(), GLURowTile), 1, 1};
-    MiddleCuStage middle(gridMiddle, {GLURowTile, 1, 1}, sync);
-    ConsCuStage cons(gridDim2, tileSize, sync2);
+    MiddleCuStage middle(gridMiddle, {GLURowTile, 1, 1}, sync, sync2);
+    ConsCuStage cons(gridDim2, tileSize, sync2, NoSync());
     
     double overlapTime = 0;
 

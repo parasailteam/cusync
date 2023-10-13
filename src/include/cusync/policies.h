@@ -123,14 +123,14 @@ struct TileSync {
    * Return the linear tile index for the grid
    */
   __device__ constexpr uint tileIndex(const dim3& tile, const dim3& grid) {
-    return (tile.x * grid.y + tile.y);
+    return (tile.y * grid.y + tile.x);
   }
 
   /*
    * Synchronizes on a tile if it is within the grid
    */
   __device__ __forceinline__ bool isSync(const dim3& tile, const dim3& grid) {
-    return tile.y < grid.y and tile.x < grid.x;
+    return true;//tile.x < grid.y and tile.x < grid.x;
   }
 };
 

@@ -42,8 +42,10 @@
 // #define AVOID_WAIT_KERNEL
 #endif
 
+//Always AVOID for batch <= 512
+
 #define AVOID_CUSTOM_ORDER
-#define AVOID_WAIT_KERNEL
+// #define AVOID_WAIT_KERNEL
 
 #include<cusync/cusync.h>
 
@@ -58,8 +60,8 @@ struct RowMajorZYX__1 {
 #ifndef EVAL_TILE_SIZES
 //Tile sizes of all GeMMs
 struct TileSizeLinearLayers {
-  typedef cutlass::gemm::GemmShape<32, 128, 32> ShapeMMAThreadBlock;
-  typedef cutlass::gemm::GemmShape<32, 32, 32> ShapeMMAWarp;
+  typedef cutlass::gemm::GemmShape<256, 128, 32> ShapeMMAThreadBlock;
+  typedef cutlass::gemm::GemmShape<128, 64, 32> ShapeMMAWarp;
 };
 struct TileSizeAttention {
   typedef cutlass::gemm::GemmShape<256, 128, 32> ShapeMMAThreadBlock;
@@ -121,20 +123,20 @@ const uint Opts =
 
 #ifdef ROWSYNC 
   using XQKVCuStage = CuStage<CuStageType::Producer, RowMajorZYX__1, NoSync, RowSync, Opts>;
-  using SCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX__1, RowSync, RowSync, Opts | Optimizations::AvoidCustomOrder>;
-  using OCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX__1, RowSync, RowSync, Opts | Optimizations::AvoidCustomOrder>;
+  using SCuStage = CuStage<CuStageType::Consumer, RowMajorZYX__1, RowSync, NoSync, Opts | Optimizations::AvoidCustomOrder>;
+  using OCuStage = CuStage<CuStageType::Producer, RowMajorZYX__1, NoSync, RowSync, Opts | Optimizations::AvoidCustomOrder>;
   using XW12CuStage = CuStage<CuStageType::Consumer, RowMajorZYX__1, RowSync, NoSync, Opts>;
   using Sync = RowSync;
 #elif defined(TILESYNC)
   using XQKVCuStage = CuStage<CuStageType::Producer, RowMajorZYX__1, NoSync, TileSync, Opts>;
-  using SCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX__1, TileSync, TileSync, Opts | Optimizations::AvoidCustomOrder>;
-  using OCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX__1, TileSync, TileSync, Opts | Optimizations::AvoidCustomOrder>;
+  using SCuStage = CuStage<CuStageType::Consumer | CuStageType::Producer, RowMajorZYX__1, TileSync, TileSync, Opts | Optimizations::AvoidCustomOrder>;
+  using OCuStage = CuStage<CuStageType::Consumer | CuStageType::Producer, RowMajorZYX__1, TileSync, TileSync, Opts | Optimizations::AvoidCustomOrder>;
   using XW12CuStage = CuStage<CuStageType::Consumer, RowMajorZYX__1, TileSync, NoSync, Opts>;
 #elif defined(STRIDEDSYNC)
   #if defined(GPT3)
-    using StridedSyncImpl = StridedSync<12288, ShapeMMAThreadBlock::kN, 3>;
+    using StridedSyncImpl = StridedSync<12288, TileSizeLinearLayers::ShapeMMAThreadBlock::kN, 3>;
   #elif defined(LLaMA)
-    using StridedSyncImpl = StridedSync<8192, ShapeMMAThreadBlock::kN, 3>;
+    using StridedSyncImpl = StridedSync<8192, TileSizeLinearLayers::ShapeMMAThreadBlock::kN, 3>;
   #else
     #error "GPT3 or LLaMA"
   #endif
@@ -220,7 +222,7 @@ class CuSyncLinearLayerGemm : public cutlass::gemm::device::CuSyncGemm<CuStage,
                                                     typename TileSize::ShapeMMAThreadBlock,
                                                     typename TileSize::ShapeMMAWarp, ShapeMMAOp,
                                                     EpilogueOp, 
-                                                    cutlass::gemm::threadblock::CuSyncGemmIdentityThreadblockSwizzle<>, 
+                                                    cutlass::gemm::threadblock::CuSyncGemmHorizontalThreadblockSwizzle,
                                                     2, 8, 8, splitK> {};
 
 template<typename CuStage, bool splitK>
@@ -231,7 +233,7 @@ class CuSyncBColumnMajorGemm : public cutlass::gemm::device::CuSyncGemm<CuStage,
                                                      SmArch, TileSizeAttention::ShapeMMAThreadBlock,
                                                      TileSizeAttention::ShapeMMAWarp, ShapeMMAOp,
                                                      EpilogueOp,
-                                                     cutlass::gemm::threadblock::CuSyncGemmIdentityThreadblockSwizzle<>,
+                                                     cutlass::gemm::threadblock::CuSyncGemmHorizontalThreadblockSwizzle,
                                                      2, 8, 8, splitK> {};
 
 // CuSync GeMMs
@@ -821,14 +823,17 @@ cudaError_t runAttentionCuSync(int split_k1, int split_k2, int split_k3, int spl
     xqkvstage.invokeWaitKernel(streams[1]);
     status = gemm_op2.run(true, NULL, streams[1]);
     CUTLASS_CHECK(status);
-
+    
+    // double e = timeInMicroSeconds();
+    // if (iters > 10) printf("%f\n", (e-start));
+    CUDA_CHECK(cudaStreamSynchronize(streams[1]));
     scustage.invokeWaitKernel(streams[2]);
     status = gemm_op3.run(true, NULL, streams[2]);
-    CUTLASS_CHECK(status);
-
-    ocustage.invokeWaitKernel(streams[3]);
-    status = gemm_op4.run(true, NULL, streams[3]);
-    CUTLASS_CHECK(status);
+    // CUTLASS_CHECK(status);
+    // CUDA_CHECK(cudaStreamSynchronize(streams[2]));
+    // ocustage.invokeWaitKernel(streams[3]);
+    // status = gemm_op4.run(true, NULL, streams[3]);
+    // CUTLASS_CHECK(status);
 
     CUDA_CHECK(cudaDeviceSynchronize());
     double end = timeInMicroSeconds();
@@ -1035,17 +1040,17 @@ int run(int argc, char* argv[]) {
   
   attnParams.initOuts();
 
-  dim3 gridDim1 = {(uint)DIVUP(attnParams.gemm_size_xqkv.m(), TileSizeLinearLayers::ShapeMMAThreadBlock::kM),
-                   (uint)DIVUP(attnParams.gemm_size_xqkv.n(), TileSizeLinearLayers::ShapeMMAThreadBlock::kN),
+  dim3 gridDim1 = {(uint)DIVUP(attnParams.gemm_size_xqkv.n(), TileSizeLinearLayers::ShapeMMAThreadBlock::kN),
+                   (uint)DIVUP(attnParams.gemm_size_xqkv.m(), TileSizeLinearLayers::ShapeMMAThreadBlock::kM),
                    split_k1};
-  dim3 gridDim2 = {(uint)DIVUP(attnParams.gemm_size_s.m(), TileSizeAttention::ShapeMMAThreadBlock::kM),
-                   (uint)DIVUP(attnParams.gemm_size_s.n(), TileSizeAttention::ShapeMMAThreadBlock::kN),
+  dim3 gridDim2 = {(uint)DIVUP(attnParams.gemm_size_s.n(), TileSizeAttention::ShapeMMAThreadBlock::kN),
+                   (uint)DIVUP(attnParams.gemm_size_s.m(), TileSizeAttention::ShapeMMAThreadBlock::kM),
                    split_k2};
-  dim3 gridDim3 = {(uint)DIVUP(attnParams.gemm_size_o.m(), TileSizeAttention::ShapeMMAThreadBlock::kM), 
-                   (uint)DIVUP(attnParams.gemm_size_o.n(), TileSizeAttention::ShapeMMAThreadBlock::kN),
+  dim3 gridDim3 = {(uint)DIVUP(attnParams.gemm_size_o.n(), TileSizeAttention::ShapeMMAThreadBlock::kN),
+                   (uint)DIVUP(attnParams.gemm_size_o.m(), TileSizeAttention::ShapeMMAThreadBlock::kM),
                    split_k3};
-  dim3 gridDim4 = {(uint)DIVUP(attnParams.gemm_size_xw12.m(), TileSizeLinearLayers::ShapeMMAThreadBlock::kM), 
-                   (uint)DIVUP(attnParams.gemm_size_xw12.n(), TileSizeLinearLayers::ShapeMMAThreadBlock::kN),
+  dim3 gridDim4 = {(uint)DIVUP(attnParams.gemm_size_xw12.n(), TileSizeLinearLayers::ShapeMMAThreadBlock::kN),
+                   (uint)DIVUP(attnParams.gemm_size_xw12.m(), TileSizeLinearLayers::ShapeMMAThreadBlock::kM),
                    split_k4};
   dim3 tileSize = {1,1,1};//{ShapeMMAThreadBlock::kM, ShapeMMAThreadBlock::kN, 1};
 
