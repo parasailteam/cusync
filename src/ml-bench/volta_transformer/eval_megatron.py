@@ -521,116 +521,164 @@ elif model == "llama" and attention_or_mlp == "mlp":
   
 elif model == "llama" and attention_or_mlp == "attention":
   tiles = {
+    #SEQ = 0
+    0: {
+      2048: {
+        "TileSizes" : [256, 128, 32, 128, 64, 32], "MaxTBsPerSM": 2, "Best-Policy": "Row-Sync",
+        "baseline": {"split_ks":   [2,1,1,1], "SoftmaxRowTile" : 1},
+        "tilesync":   {"split_ks": [2,1,1,1], "SoftmaxRowTile" : 1,
+        "AvoidCustomOrder": False,
+        "AvoidWaitKernel": False,
+        "ReorderTileLoads": True},
+        "rowsync":   {"split_ks":  [2,1,1,1], "SoftmaxRowTile" : 1},
+      },
+      1024: {"TileSizes" : [256, 128, 32, 128, 64, 32], "MaxTBsPerSM": 2, "Best-Policy": "Row-Sync",
+        "baseline": {"split_ks":  [3,1,1,1], "SoftmaxRowTile" : 1},
+        "tilesync":   {"split_ks": [3,1,1,1], "SoftmaxRowTile" : 1,
+        "AvoidCustomOrder": False,
+        "AvoidWaitKernel": False,
+        "ReorderTileLoads": True},
+        "rowsync":   {"split_ks": [3,1,1,1], "SoftmaxRowTile" : 1},
+      },
+      512: {"TileSizes" : [128, 128, 32, 64, 64, 32], "MaxTBsPerSM": 2, "Best-Policy": "Row-Sync",
+        "baseline": {"split_ks": [3,2,1,1], "SoftmaxRowTile" : 1},
+        "tilesync":   {"split_ks": [3,2,1,1], "SoftmaxRowTile" : 1,
+        "AvoidCustomOrder": True,
+        "AvoidWaitKernel": True,
+        "ReorderTileLoads": True},
+        "rowsync":   {"split_ks": [3,2,1,1], "SoftmaxRowTile" : 1},
+      },
+      256: {"TileSizes" : [128, 128, 32, 64, 64, 32], "MaxTBsPerSM": 2, "Best-Policy": "Tile-Sync",
+        "baseline": {"split_ks": [6,3,1,1], "SoftmaxRowTile" : 1},
+        "tilesync":   {"split_ks": [6,3,1,1], "SoftmaxRowTile" : 1,
+        "AvoidCustomOrder": True,
+        "AvoidWaitKernel": True,
+        "ReorderTileLoads": True},
+        "rowsync":   {"split_ks": [6,3,1,1], "SoftmaxRowTile" : 1},
+      },
+      128: {"TileSizes" : [128, 128, 32, 64, 64, 32], "MaxTBsPerSM": 2, "Best-Policy": "Tile-Sync",
+        "baseline": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
+        "tilesync":   {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
+        "AvoidCustomOrder": False,
+        "AvoidWaitKernel": False,
+        "ReorderTileLoads": True},
+        "rowsync":   {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
+      },
+      64: {"TileSizes" : [64, 256, 32, 32, 128, 32], "MaxTBsPerSM": 3, "Best-Policy": "Tile-Sync",
+        "baseline": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
+        "tilesync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 2,
+        "AvoidCustomOrder": False,
+        "AvoidWaitKernel": False,
+        "ReorderTileLoads": True,},
+        "rowsync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 2,
+        "AvoidCustomOrder": False,
+        "AvoidWaitKernel": False}
+      },
+      32: {"TileSizes" : [32, 256, 32, 32, 64, 32], "MaxTBsPerSM": 3,
+        "baseline": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
+        "tilesync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
+        "AvoidCustomOrder": True,
+        "AvoidWaitKernel": True,
+        "ReorderTileLoads": True,},
+        "rowsync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
+        "AvoidCustomOrder": True,
+        "AvoidWaitKernel": True}
+      },
+      16: {"TileSizes" : [32, 256, 32, 32, 64, 32], "MaxTBsPerSM": 3,
+        "baseline": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
+        "tilesync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
+        "AvoidCustomOrder": True,
+        "AvoidWaitKernel": True,
+        "ReorderTileLoads": True,},
+        "rowsync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
+        "AvoidCustomOrder": True,
+        "AvoidWaitKernel": True}
+      },
+      8: {"TileSizes" : [32, 256, 32, 32, 64, 32], "MaxTBsPerSM": 3,
+        "baseline": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
+        "tilesync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
+        "AvoidCustomOrder": True,
+        "AvoidWaitKernel": True,
+        "ReorderTileLoads": True},
+        "rowsync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
+        "AvoidCustomOrder": True,
+        "AvoidWaitKernel": True}
+      },
+      4: {"TileSizes" : [32, 256, 32, 32, 64, 32], "MaxTBsPerSM": 3,
+        "baseline": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
+        "tilesync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
+        "AvoidCustomOrder": True,
+        "AvoidWaitKernel": True,
+        "ReorderTileLoads": True},
+        "rowsync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
+        "AvoidCustomOrder": True,
+        "AvoidWaitKernel": True}
+      },
+      2: {"TileSizes" : [32, 256, 32, 32, 64, 32], "MaxTBsPerSM": 3,
+        "baseline": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
+        "tilesync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
+        "AvoidCustomOrder": True,
+        "AvoidWaitKernel": True,
+        "ReorderTileLoads": True},
+        "rowsync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
+        "AvoidCustomOrder": True,
+        "AvoidWaitKernel": True}
+      },
+      1: {"TileSizes" : [32, 128, 32, 32, 32, 32], "MaxTBsPerSM": 3,
+        "baseline": {"split_ks": [5,4,1,3], "SoftmaxRowTile" : 1},
+        "tilesync": {"split_ks": [5,4,1,3], "SoftmaxRowTile" : 1,
+        "AvoidCustomOrder": True,
+        "AvoidWaitKernel": True,
+        "ReorderTileLoads": True},
+        "rowsync": {"split_ks": [5,4,1,3], "SoftmaxRowTile" : 1,
+        "AvoidCustomOrder": True,
+        "AvoidWaitKernel": True}
+      }
+    },
+    #SEQ = 1024 and above
+    1024: {
+      1: {"TileSizes" : [32, 128, 32, 32, 64, 32], "MaxTBsPerSM": 3,
+        "baseline": {"split_ks": [6,3,2,2], "SoftmaxRowTile" : 1},
+        "tilesync": {"split_ks": [6,3,2,2], "SoftmaxRowTile" : 1,
+        "AvoidCustomOrder": True,
+        "AvoidWaitKernel": True,
+        "ReorderTileLoads": True},
+        "rowsync": {"split_ks": [6,3,2,2], "SoftmaxRowTile" : 1,
+        "AvoidCustomOrder": True,
+        "AvoidWaitKernel": True}
+      },
+      4: {"TileSizes" : [32, 128, 32, 32, 64, 32], "MaxTBsPerSM": 3,
+        "baseline": {"split_ks": [6,3,2,2], "SoftmaxRowTile" : 1},
+        "tilesync": {"split_ks": [6,3,2,2], "SoftmaxRowTile" : 1,
+        "AvoidCustomOrder": True,
+        "AvoidWaitKernel": True,
+        "ReorderTileLoads": True},
+        "rowsync": {"split_ks": [6,3,2,2], "SoftmaxRowTile" : 1,
+        "AvoidCustomOrder": True,
+        "AvoidWaitKernel": True}
+      }
+    },
     2048: {
-      "TileSizes" : [256, 128, 32, 128, 64, 32], "MaxTBsPerSM": 2, "Best-Policy": "Row-Sync",
-      "baseline": {"split_ks":   [4,1,1,1], "SoftmaxRowTile" : 1},
-      "tilesync":   {"split_ks": [2,1,1,1], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": False,
-      "AvoidWaitKernel": False,
-      "ReorderTileLoads": True},
-      "rowsync":   {"split_ks":  [2,1,1,1], "SoftmaxRowTile" : 1},
-    },
-    1024: {"TileSizes" : [256, 128, 32, 128, 64, 32], "MaxTBsPerSM": 2, "Best-Policy": "Row-Sync",
-      "baseline": {"split_ks":  [1,1,1,1], "SoftmaxRowTile" : 1},
-      "tilesync":   {"split_ks": [2,1,1,1], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": False,
-      "AvoidWaitKernel": False,
-      "ReorderTileLoads": True},
-      "rowsync":   {"split_ks": [2,1,1,1], "SoftmaxRowTile" : 1},
-    },
-    512: {"TileSizes" : [256, 128, 32, 128, 64, 32], "MaxTBsPerSM": 2, "Best-Policy": "Row-Sync",
-      "baseline": {"split_ks": [3,2,1,1], "SoftmaxRowTile" : 1},
-      "tilesync":   {"split_ks": [3,2,1,1], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": True,
-      "AvoidWaitKernel": True,
-      "ReorderTileLoads": True},
-      "rowsync":   {"split_ks": [3,2,1,1], "SoftmaxRowTile" : 1},
-    },
-    256: {"TileSizes" : [256, 128, 32, 128, 64, 32], "MaxTBsPerSM": 2, "Best-Policy": "Tile-Sync",
-      "baseline": {"split_ks": [10,2,1,1], "SoftmaxRowTile" : 1},
-      "tilesync":   {"split_ks": [10,2,1,1], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": False,
-      "AvoidWaitKernel": False,
-      "ReorderTileLoads": True},
-      "rowsync":   {"split_ks": [10,2,1,1], "SoftmaxRowTile" : 1},
-    },
-    128: {"TileSizes" : [128, 128, 32, 64, 64, 32], "MaxTBsPerSM": 2, "Best-Policy": "Tile-Sync",
-      "baseline": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
-      "tilesync":   {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": False,
-      "AvoidWaitKernel": False,
-      "ReorderTileLoads": True},
-      "rowsync":   {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
-    },
-    64: {"TileSizes" : [64, 256, 32, 32, 128, 32], "MaxTBsPerSM": 3, "Best-Policy": "Tile-Sync",
-      "baseline": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
-      "tilesync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 2,
-      "AvoidCustomOrder": False,
-      "AvoidWaitKernel": False,
-      "ReorderTileLoads": True,},
-      "rowsync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 2,
-      "AvoidCustomOrder": False,
-      "AvoidWaitKernel": False}
-    },
-    32: {"TileSizes" : [32, 256, 32, 32, 64, 32], "MaxTBsPerSM": 3,
-      "baseline": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
-      "tilesync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": True,
-      "AvoidWaitKernel": True,
-      "ReorderTileLoads": True,},
-      "rowsync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": True,
-      "AvoidWaitKernel": True}
-    },
-    16: {"TileSizes" : [32, 256, 32, 32, 64, 32], "MaxTBsPerSM": 3,
-      "baseline": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
-      "tilesync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": True,
-      "AvoidWaitKernel": True,
-      "ReorderTileLoads": True,},
-      "rowsync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": True,
-      "AvoidWaitKernel": True}
-    },
-    8: {"TileSizes" : [32, 256, 32, 32, 64, 32], "MaxTBsPerSM": 3,
-      "baseline": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
-      "tilesync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": True,
-      "AvoidWaitKernel": True,
-      "ReorderTileLoads": True},
-      "rowsync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": True,
-      "AvoidWaitKernel": True}
-    },
-    4: {"TileSizes" : [32, 256, 32, 32, 64, 32], "MaxTBsPerSM": 3,
-      "baseline": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
-      "tilesync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": True,
-      "AvoidWaitKernel": True,
-      "ReorderTileLoads": True},
-      "rowsync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": True,
-      "AvoidWaitKernel": True}
-    },
-    2: {"TileSizes" : [32, 256, 32, 32, 64, 32], "MaxTBsPerSM": 3,
-      "baseline": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1},
-      "tilesync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": True,
-      "AvoidWaitKernel": True,
-      "ReorderTileLoads": True},
-      "rowsync": {"split_ks": [6,2,1,2], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": True,
-      "AvoidWaitKernel": True}
-    },
-    1: {"TileSizes" : [32, 128, 32, 32, 32, 32], "MaxTBsPerSM": 3,
-      "baseline": {"split_ks": [5,4,1,3], "SoftmaxRowTile" : 1},
-      "tilesync": {"split_ks": [5,4,1,3], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": True,
-      "AvoidWaitKernel": True,
-      "ReorderTileLoads": True},
-      "rowsync": {"split_ks": [5,4,1,3], "SoftmaxRowTile" : 1,
-      "AvoidCustomOrder": True,
-      "AvoidWaitKernel": True}
+      1: {"TileSizes" : [32, 128, 32, 32, 64, 32], "MaxTBsPerSM": 3,
+        "baseline": {"split_ks": [6,3,2,2], "SoftmaxRowTile" : 1},
+        "tilesync": {"split_ks": [6,3,2,2], "SoftmaxRowTile" : 1,
+        "AvoidCustomOrder": True,
+        "AvoidWaitKernel": True,
+        "ReorderTileLoads": True},
+        "rowsync": {"split_ks": [6,3,2,2], "SoftmaxRowTile" : 1,
+        "AvoidCustomOrder": True,
+        "AvoidWaitKernel": True}
+      },
+      4: {"TileSizes" : [32, 128, 32, 32, 64, 32], "MaxTBsPerSM": 3,
+        "baseline": {"split_ks": [6,3,2,2], "SoftmaxRowTile" : 1},
+        "tilesync": {"split_ks": [6,3,2,2], "SoftmaxRowTile" : 1,
+        "AvoidCustomOrder": True,
+        "AvoidWaitKernel": True,
+        "ReorderTileLoads": True},
+        "rowsync": {"split_ks": [6,3,2,2], "SoftmaxRowTile" : 1,
+        "AvoidCustomOrder": True,
+        "AvoidWaitKernel": True}
+      }
     }
   }
 
@@ -674,8 +722,14 @@ if 'stridedsync' in policies and attention_or_mlp == 'mlp':
   policies.pop(policies.index('stridedsync'))
 
 deleteFiles(policies+['baseline'], attention_or_mlp)
+#(1024,1), (1024,4), (2048,1), (2048,4),
+for case in [ (0,512), (0, 1024), (0, 2048)]:#[1,2,4,8,16,32,64,512,1024,2048]:
+  if attention_or_mlp == "attention":
+    m = case[1]
+    seq = case[0]
+  else:
+    m = case[0]
 
-for m in [2048]:#[1,2,4,8,16,32,64,512,1024,2048]:
   if False:
     if attention_or_mlp == "attention":
       (s, o) = subprocess.getstatusoutput(f"python3 torch-baselines/torchAttention.py {m} {int(H/8)} {H} {H}")
@@ -741,13 +795,22 @@ for m in [2048]:#[1,2,4,8,16,32,64,512,1024,2048]:
   if 'stridedsync' in policies and attention_or_mlp == 'mlp':
     policies.pop(policies.index('stridedsync'))
 
-  for syncPolicy in (policies+['baseline']):
-    genFiles(tiles[m], syncPolicy, attention_or_mlp)
+  caseTiles = None
+  if attention_or_mlp == "attention":
+    caseTiles = tiles[seq][m]
+  else:
+    caseTiles = tiles[m]
 
+  for syncPolicy in (policies+['baseline']):
+    genFiles(caseTiles, syncPolicy, attention_or_mlp)
+    
   makeFiles(policies+['baseline'], attention_or_mlp)
-  split_ks = tiles[m]['baseline']['split_ks']
+  split_ks = caseTiles['baseline']['split_ks']
   splitKArgs = " " + " ".join([f"--split-k{i+1} {split_ks[i]}" for i in range(len(split_ks))])
-  baselineCommand = buildDir(f"{attention_or_mlp}-eval-baseline") + f" --batch {m} --check false --model {model.lower()}"
+  commandArgs = f" --batch {m} --check false --model {model.lower()}"
+  if attention_or_mlp == "attention":
+    commandArgs += f" --seqlen {(seq - m) if seq > m else seq}"
+  baselineCommand = buildDir(f"{attention_or_mlp}-eval-baseline") + commandArgs
   (s, o) = subprocess.getstatusoutput(baselineCommand + splitKArgs)
 
   if "Invalid" in o:
@@ -755,12 +818,11 @@ for m in [2048]:#[1,2,4,8,16,32,64,512,1024,2048]:
   elif s != 0:
     print("error " + o)
   else:
-    # print(o)
     baselinetimes = getAllTimes(o, 'START-BASELINE', 'END-BASELINE')
     bTimeTotal = baselinetimes["Total"]
     bTimeMatmul1 = baselinetimes["matmul1Time"]
     bTimeMatmul2 = baselinetimes["matmul2Time"]
-    print(f'{m} & {H} & baseline & {"%.2f"%avg(bTimeTotal)} & {"%.2f"%stdev(bTimeTotal)} & {"%.2f"%avg(bTimeMatmul1)} & {"%.2f"%avg(bTimeMatmul2)}')
+    print(f'{m} & {str(seq) + "&" if attention_or_mlp == "attention" else ""} {H} & baseline & {"%.2f"%avg(bTimeTotal)} & {"%.2f"%stdev(bTimeTotal)} & {"%.2f"%avg(bTimeMatmul1)} & {"%.2f"%avg(bTimeMatmul2)}')
     baselineDone = True
 
   for syncPolicy in policies:
@@ -768,9 +830,9 @@ for m in [2048]:#[1,2,4,8,16,32,64,512,1024,2048]:
       b = f"{attention_or_mlp}-{model}-eval-{syncPolicy}"
     else:
       b = f"{attention_or_mlp}-eval-{syncPolicy}"
-    command = buildDir(b) + f" --batch {m} --check false --model {model.lower()}"
+    command = buildDir(b) + commandArgs
 
-    splitKs = tiles[m]["tilesync"] if syncPolicy == "stridedsync" else tiles[m][syncPolicy]
+    splitKs = caseTiles["tilesync"] if syncPolicy == "stridedsync" else caseTiles[syncPolicy]
     split_ks = splitKs['split_ks']
     splitKArgs = " " + " ".join([f"--split-k{i+1} {split_ks[i]}" for i in range(len(split_ks))])
     (s, o) = subprocess.getstatusoutput(command + splitKArgs)
@@ -784,7 +846,7 @@ for m in [2048]:#[1,2,4,8,16,32,64,512,1024,2048]:
       overlaptimes  = getAllTimes(o, 'START-OVERLAPPED', 'END-OVERLAPPED')
       otime = overlaptimes["Total"]
 
-    print(f'{m} & {H} & {syncPolicy} & {"%.2f"%avg(bTimeTotal)} & {"%.2f"%stdev(bTimeTotal)} & {"%.2f"%avg(bTimeMatmul1)} & {"%.2f"%avg(bTimeMatmul2)} & {"%.2f"%avg(otime)} & {"%.2f"%stdev(otime)} & {"%.2f"%(100 - avg(otime)/avg(bTimeTotal)*100)}')
+    print(f'{m} & {str(seq) + "&" if attention_or_mlp == "attention" else ""} {H} & {syncPolicy} & {"%.2f"%avg(bTimeTotal)} & {"%.2f"%stdev(bTimeTotal)} & {"%.2f"%avg(bTimeMatmul1)} & {"%.2f"%avg(bTimeMatmul2)} & {"%.2f"%avg(otime)} & {"%.2f"%stdev(otime)} & {"%.2f"%(100 - avg(otime)/avg(bTimeTotal)*100)}')
       # btime = re.findall(r'START-BASELINE: ([\.\d]+)', o)
       # baselineTimes[m] = btime[0]
       # otime = re.findall(r'START-OVERLAPPED elapsedtime ([\.\d]+)', o)
@@ -799,8 +861,8 @@ for m in [2048]:#[1,2,4,8,16,32,64,512,1024,2048]:
 # print(minimumTimes)
 # print("M & N & K & L & TBs & Baseline(us)  & Overlapped(us) & Minimum(us) & Speedup & MaxSpeedup")
 
-for m in baselineTimes:
-  print(f"{m} & {n} & {k} & {l} & {m//128*n//128} & {baselineTimes[m]} & {cublasTimes[m]} & {overlappedTimes[m]} & {minimumTimes[m]} & {speedup[m]} & {maxspeedup[m]}")
+# for m in baselineTimes:
+#   print(f"{m} & {n} & {k} & {l} & {m//128*n//128} & {baselineTimes[m]} & {cublasTimes[m]} & {overlappedTimes[m]} & {minimumTimes[m]} & {speedup[m]} & {maxspeedup[m]}")
 
 
 # tiles1 = {

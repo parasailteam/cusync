@@ -59,14 +59,8 @@ struct RowMajorZYX__1 {
 
 #ifndef EVAL_TILE_SIZES
 //Tile sizes of all GeMMs
-struct TileSizeLinearLayers {
-  typedef cutlass::gemm::GemmShape<32, 128, 32> ShapeMMAThreadBlock;
-  typedef cutlass::gemm::GemmShape<32, 64, 32> ShapeMMAWarp;
-};
-struct TileSizeAttention {
-  typedef cutlass::gemm::GemmShape<32, 128, 32> ShapeMMAThreadBlock;
-  typedef cutlass::gemm::GemmShape<32, 64, 32> ShapeMMAWarp;
-};
+typedef cutlass::gemm::GemmShape<256, 128, 32> ShapeMMAThreadBlock;
+typedef cutlass::gemm::GemmShape<128, 64, 32> ShapeMMAWarp;
 const int SoftmaxRowTile = 1;
 // using ShapeMMAThreadBlock = cutlass::gemm::GemmShape<256, 128, 32>;
 // using ShapeMMAWarp = cutlass::gemm::GemmShape<128, 64, 32>;
@@ -78,27 +72,39 @@ using ShapeMMAWarp = cutlass::gemm::GemmShape<128, 64, 32>;
 //</eval tiles>
 #endif
 
+struct TileSizeLinearLayers {
+  using ShapeMMAThreadBlock = ::ShapeMMAThreadBlock;
+  using ShapeMMAWarp = ::ShapeMMAWarp;
+};
+struct TileSizeAttention {
+  using ShapeMMAThreadBlock = ::ShapeMMAThreadBlock;
+  using ShapeMMAWarp = ::ShapeMMAWarp;
+};
+
 
 template<uint H, uint Tile, uint stride>
 struct StridedSync {
   uint waitValue_;
   uint postValue_;
 
-  __device__ __host__ StridedSync(): waitValue_(stride), postValue_(1) {}
+  __device__ __host__ StridedSync(uint waitValue):
+    waitValue_(waitValue), postValue_(1) {}
   
+  __device__ __host__ StridedSync() {}
+
   __device__ __host__ uint waitValue(const dim3& tile, const dim3& grid) {
-    return stride;
+    return waitValue_;
   }
 
   __device__ __host__ uint postValue(const dim3& tile, const dim3& grid) 
     {return 1;}
 
   __device__ constexpr uint tileIndex(const dim3& tile, const dim3& grid) {
-    return tile.x * (grid.y/((H/8)/Tile)) + tile.y%((H/8)/Tile);
+    return tile.x * (grid.x/((H/8)/Tile)) + tile.y/((H/8)/Tile);
   }
 
   __device__ bool isSync(const dim3& tile, const dim3& grid) {
-    return true; //tile.y < (H/8)/ShapeMMAThreadBlock::kN;
+    return tile.y == 0;
   }
 };
 
@@ -141,9 +147,9 @@ const uint Opts =
     #error "GPT3 or LLaMA"
   #endif
   using XQKVCuStage = CuStage<CuStageType::Producer, RowMajorZYX__1, NoSync, StridedSyncImpl, Opts>;
-  using SCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX__1, StridedSyncImpl, TileSync, Opts | Optimizations::AvoidCustomOrder>;
-  using OCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX__1, TileSync, TileSync, Opts | Optimizations::AvoidCustomOrder>;
-  using XW12CuStage = CuStage<CuStageType::Consumer, RowMajorZYX__1, TileSync, NoSync, Opts>;
+  using SCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX__1, StridedSyncImpl, RowSync, Opts | Optimizations::AvoidCustomOrder>;
+  using OCuStage = CuStage<CuStageType::Producer|CuStageType::Consumer, RowMajorZYX__1, RowSync, RowSync, Opts | Optimizations::AvoidCustomOrder>;
+  using XW12CuStage = CuStage<CuStageType::Consumer, RowMajorZYX__1, RowSync, NoSync, Opts>;
 #else
   #error "Unknown Synchronization"
 #endif 
@@ -592,7 +598,6 @@ cudaError_t runAttentionBaseline(int split_k1, int split_k2, int split_k3, int s
                                  int iters = 100) {  
   // ElementOutput* device_xqkv = tensor_xqkv.device_data();
   cutlass::Status status;
-  std::cout << "gemm_size_xqkv.m() " << attnParams.gemm_size_xqkv.m() << " n " << attnParams.gemm_size_xqkv.n() << " k " << attnParams.gemm_size_xqkv.k() << std::endl;
   //Setup First GeMM
   typename GemmTy1::Arguments args1{attnParams.gemm_size_xqkv,
                                     attnParams.x.device_ref(),
@@ -1055,16 +1060,16 @@ int run(int argc, char* argv[]) {
 
 #ifdef ROWSYNC
   using Sync1 = RowSync;
-  RowSync sync1(gridDim1.x/3);
+  RowSync sync1(gridDim1.x);
   RowSync sync2(gridDim2.x);
   RowSync sync3(gridDim3.x);
   RowSync sync4(gridDim4.x);
 #elif defined(TILESYNC)
   TileSync sync1(1,1), sync2(1,1), sync3(1,1), sync4(1,1);
 #elif defined(STRIDEDSYNC)
-  StridedSyncImpl sync1;
-  TileSync sync2(1, 1);
-  TileSync sync3(1, 1);
+  StridedSyncImpl sync1(gridDim1.x/3);
+  RowSync sync2(gridDim2.x);
+  RowSync sync3(gridDim3.x);
 #else
   #error "Unknown Policy"
 #endif
