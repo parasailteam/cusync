@@ -1,11 +1,23 @@
+/*
+/usr/local/cuda-12.3/nvvm/bin/cicc --c++17 --gnu_version=110400 --display_error_number -arch compute_70 -D__NVCC__ -D__CUDACC__ --no-version-ident -ftz=0 -prec_div=1 -prec_sqrt=1 -fmad=1 --allow_managed -I /usr/local/cuda/bin/../targets/x86_64-linux/include/ -I/usr/include/x86_64-linux-gnu/ -I/usr/lib/gcc/x86_64-linux-gnu/11/include/ -I/home/saemal/cusync/src/include/cusync -DCUDA_DOUBLE_MATH_FUNCTIONS -D__x86_64__ -D__LP64__ -D__CUDACC_VER_MAJOR__=12 -D__CUDACC_VER_MINOR__=3 -D__CUDACC_VER_BUILD__=52 -D__CUDA_API_VER_MAJOR__=12 -D__CUDA_API_VER_MINOR__=3 -D__CUDA_LIBDEVICE__ -D__NVCC_DIAG_PRAGMA_SUPPORT__=1  -m64 -tused simple-test-device.ci -o kernel.ptx
+*/
+
+#include <stdio.h>
+#include <assert.h>
+
+#include <device_launch_parameters.h>
+
+
 #include <assert.h>
 #include <stdio.h>
-#include <type_traits>
+
+typedef unsigned int uint;
 
 #include "tile-orders.h"
 #include "policies.h"
 #include "device-functions.h"
 #include "wait-kernel.h"
+
 
 #pragma once
 
@@ -211,11 +223,11 @@ public:
 
   //A producer have a policy for its output 
   __device__ __host__ __forceinline__
-  bool isProducer() {return !std::is_same<OutputSyncPolicy, NoSync>::value;}
+  bool isProducer() {return 0;} //!std::is_same<OutputSyncPolicy, NoSync>::value;}
 
   //A consumer have a policy for its input 
   __device__ __host__ __forceinline__
-  bool isConsumer() {return !std::is_same<InputSyncPolicy, NoSync>::value;}
+  bool isConsumer() {return 0;}//!std::is_same<InputSyncPolicy, NoSync>::value;}
 
   //Return grid size of this stage
   dim3 grid() {return grid_;}
@@ -328,6 +340,7 @@ public:
     }
   }
 
+/*
   __host__
   CuSyncError invokeWaitKernel(cudaStream_t stream) {
     if (!isProducer()) return CuSyncErrorNotProducer;
@@ -338,7 +351,7 @@ public:
     if (cudaGetLastError() == cudaSuccess) return CuSyncErrorCUDAError;
     return CuSyncSuccess;
   }
-
+*/
   __host__
   void incrementIter() {iter += 1;}  
 };
@@ -357,3 +370,44 @@ struct CuSync {
   }
 };
 }
+
+
+
+using namespace cusync;
+
+using Sync = TileSync<IdentityOrder, 1, 1>;
+using ProdCuStage = CuStage<IdentityOrder, NoSync, Sync>;
+using ConsCuStage = CuStage<IdentityOrder, Sync, NoSync>;
+
+
+
+using ElemType = float;
+
+typedef unsigned int uint;
+
+__attribute__((global))
+void prodKernel(int idx, ElemType* in, ElemType* out) {
+  uint3 tile = blockIdx;
+  __attribute__((shared)) int tileSh[3];
+  //tile = custage.tile((dim3*)&tileSh[0]);
+  //custage.wait(tile);
+	
+  unsigned int linearid = threadIdx.x + blockIdx.x * blockDim.x;
+	out[linearid] = in[linearid];
+  
+  //custage.post(tile);
+  //cutest.setSemValue(idx, tile, custage);
+}
+
+
+__attribute__((global))
+void consKernel(int idx, ElemType* in, ElemType* out) {
+  uint3 tile = blockIdx;
+  __attribute__((shared)) int tileSh[3];
+  //tile = custage.tile((dim3*)&tileSh[0]);
+  //custage.wait(tile);
+	
+  unsigned int linearid = threadIdx.x + blockIdx.x * blockDim.x;
+	out[linearid] = in[linearid];
+}
+
