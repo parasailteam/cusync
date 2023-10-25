@@ -4,12 +4,9 @@
 
 #include <stdio.h>
 #include <assert.h>
+#include <type_traits>
 
 #include <device_launch_parameters.h>
-
-
-#include <assert.h>
-#include <stdio.h>
 
 typedef unsigned int uint;
 
@@ -18,8 +15,6 @@ typedef unsigned int uint;
 #include "device-functions.h"
 #include "wait-kernel.h"
 
-
-#pragma once
 
 #define CUDA_CHECK(cmd) do {                        \
   cudaError_t e = cmd;                              \
@@ -223,7 +218,7 @@ public:
 
   //A producer have a policy for its output 
   __device__ __host__ __forceinline__
-  bool isProducer() {return 0;} //!std::is_same<OutputSyncPolicy, NoSync>::value;}
+  bool isProducer() {return !std::is_same<OutputSyncPolicy, NoSync>::value;}
 
   //A consumer have a policy for its input 
   __device__ __host__ __forceinline__
