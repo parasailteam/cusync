@@ -113,17 +113,9 @@ private:
   friend class CuSyncTest;
   friend class CuSync;
 
-  //Get tile status semaphore arrays
-  __device__ __host__ __forceinline__
-  volatile uint* getTileStatusToPost()         {return tileStatusWrite_;}
-  __device__ __host__ __forceinline__
-  volatile uint* getTileStatusToWait()         {return tileStatusRead_;}
-
-  //Set tile status semaphore arrays
-  __host__ __forceinline__
-  void setTileStatusToPost(volatile uint* ptr) {tileStatusWrite_ = ptr ;}
-  __host__ __forceinline__
-  void setTileStatusToWait(volatile uint* ptr) {tileStatusRead_  = ptr ;}
+  //Set the producer grid
+  template<typename ProdCuStage>
+  void setProdGrid(ProdCuStage& prod) {prodGrid_ = prod.grid();}
 
   //Call TileOrder parameter to generate tile order and store 
   //it in tileOrder
@@ -161,17 +153,21 @@ private:
     return CuSyncSuccess;
   }
 
-  //Set the producer grid
-  template<typename ProdCuStage>
+  //Set tile status semaphore arrays
   __host__
-  void setProdGrid(ProdCuStage& prod) {prodGrid_ = prod.grid();}
+  inline void setTileStatusToPost(volatile uint* ptr) {tileStatusWrite_ = ptr ;}
+  __host__
+  inline void setTileStatusToWait(volatile uint* ptr) {tileStatusRead_  = ptr ;}
 
+#if defined(__CUDACC__) || defined(__NVCC__)
+  //Get tile status semaphore arrays 
+  __device__ __host__ __forceinline__
+  volatile uint* getTileStatusToPost()         {return tileStatusWrite_;}
+  __device__ __host__ __forceinline__
+  volatile uint* getTileStatusToWait()         {return tileStatusRead_;}
+#endif
 
 public:
-  __device__ __host__ 
-  CuStage(): iter(1) {}
-
-  __host__
   CuStage(dim3 grid, dim3 tileSize, InputSyncPolicy inputPolicy, OutputSyncPolicy outputPolicy) : 
     grid_(grid), 
     prodGrid_(0), //set by CuSync::set* methods 
@@ -194,12 +190,27 @@ public:
         CUDA_CHECK(cudaMemset(kernelExecuted_, 0, sizeof(int)));
       }
     }
-  } 
+  }
 
+  //Return grid size of this stage
+  dim3 grid() {return grid_;}
+
+  CuSyncError invokeWaitKernel(cudaStream_t stream) {
+    if (!isProducer()) return CuSyncErrorNotProducer;
+    if (!getAvoidWaitKernel()) {
+      waitKernel<<<1,1,0,stream>>>((uint*)kernelExecuted_, iter);
+    }
+    
+    if (cudaGetLastError() != cudaSuccess) return CuSyncErrorCUDAError;
+    return CuSyncSuccess;
+  }
+
+  void incrementIter() {iter += 1;}
+
+#if defined(__CUDACC__) || defined(__NVCC__)
   /*
    * Getters and setters for private variables.
    */
-  //Getters for optimizations
   __device__ __host__ __forceinline__
   bool getNoAtomicAdd     () {return Opts & NoAtomicAdd;     }
   __device__ __host__ __forceinline__
@@ -216,9 +227,9 @@ public:
   //A consumer have a policy for its input 
   __device__ __host__ __forceinline__
   bool isConsumer() {return !std::is_same<InputSyncPolicy, NoSync>::value;}
-
-  //Return grid size of this stage
-  dim3 grid() {return grid_;}
+  #if defined(__CUDACC__) || defined(__NVCC__)
+  __device__ 
+  CuStage(): iter(1) {}
 
   /* 
    * Returns total number of thread blocks
@@ -316,7 +327,7 @@ public:
           }
           *shared_storage = tileOrder[linear_id];
         }
-      }    
+      }
 
       if (shared_storage != nullptr) {
         __syncthreads();
@@ -327,20 +338,7 @@ public:
       return blockIdx;
     }
   }
-
-  __host__
-  CuSyncError invokeWaitKernel(cudaStream_t stream) {
-    if (!isProducer()) return CuSyncErrorNotProducer;
-    if (!getAvoidWaitKernel()) {
-      waitKernel<<<1,1,0,stream>>>((uint*)kernelExecuted_, iter);
-    }
-    
-    if (cudaGetLastError() == cudaSuccess) return CuSyncErrorCUDAError;
-    return CuSyncSuccess;
-  }
-
-  __host__
-  void incrementIter() {iter += 1;}  
+#endif
 };
 
 struct CuSync {
