@@ -1,6 +1,8 @@
 /*
-/usr/local/cuda-12.3/nvvm/bin/cicc --c++17 --gnu_version=110400 --display_error_number -arch compute_70 -D__NVCC__ -D__CUDACC__ --no-version-ident -ftz=0 -prec_div=1 -prec_sqrt=1 -fmad=1 --allow_managed -I /usr/local/cuda/bin/../targets/x86_64-linux/include/ -I/usr/include/x86_64-linux-gnu/ -I/usr/lib/gcc/x86_64-linux-gnu/11/include/ -I/home/saemal/cusync/src/include/cusync -DCUDA_DOUBLE_MATH_FUNCTIONS -D__x86_64__ -D__LP64__ -D__CUDACC_VER_MAJOR__=12 -D__CUDACC_VER_MINOR__=3 -D__CUDACC_VER_BUILD__=52 -D__CUDA_API_VER_MAJOR__=12 -D__CUDA_API_VER_MINOR__=3 -D__CUDA_LIBDEVICE__ -D__NVCC_DIAG_PRAGMA_SUPPORT__=1  -m64 -tused simple-test-device.ci -o kernel.ptx
+/usr/local/cuda-12.3/nvvm/bin/cicc --c++17 --gnu_version=110400 --display_error_number -arch compute_70 -D__NVCC__ -D__CUDACC__ --no-version-ident -ftz=0 -prec_div=1 -prec_sqrt=1 -fmad=1 --allow_managed -I /usr/local/cuda/bin/../targets/x86_64-linux/include/ -I/usr/include/x86_64-linux-gnu/ -I/usr/lib/gcc/x86_64-linux-gnu/11/include/ -I/usr/include/c++/11/ -I/usr/include/x86_64-linux-gnu/c++/11/ -I/home/saemal/cusync/src/include/cusync -DCUDA_DOUBLE_MATH_FUNCTIONS -D__x86_64__ -D__LP64__ -D__CUDACC_VER_MAJOR__=12 -D__CUDACC_VER_MINOR__=3 -D__CUDACC_VER_BUILD__=52 -D__CUDA_API_VER_MAJOR__=12 -D__CUDA_API_VER_MINOR__=3 -D__CUDA_LIBDEVICE__ -D__NVCC_DIAG_PRAGMA_SUPPORT__=1 -m64 -tused simple-test-device.ci -o kernel.ptx
 */
+
+#define __cplusplus 201703L
 
 #include <stdio.h>
 #include <assert.h>
