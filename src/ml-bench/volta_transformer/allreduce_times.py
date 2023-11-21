@@ -6,26 +6,30 @@ import torch.multiprocessing as mp
 import time
 import sys
 
-H = int(sys.argv[1])
-
 def run(rank, size):
     """ Distributed function to be implemented later. """
-    for b in [1,2,4,8,16,32,64,128,256,512,1024,2048]:
-        inT = torch.ones(b*H,dtype=torch.half).cuda(rank)
+    for H in [12288, 8192]:
+        results_csv = ""
+        for b in [1,2,4,8,16,32,64,128,256,512,1024,2048]:
+            inT = torch.ones(b*H,dtype=torch.half).cuda(rank)
 
-        for i in range(10):
-            dist.all_reduce(inT)
-        torch.cuda.synchronize()
-        dist.barrier()
+            for i in range(10):
+                dist.all_reduce(inT)
+            torch.cuda.synchronize()
+            dist.barrier()
 
-        s = time.time()
-        for i in range(100):
-            dist.all_reduce(inT)
-        torch.cuda.synchronize()
-        e = time.time()
-        
+            s = time.time()
+            for i in range(100):
+                dist.all_reduce(inT)
+            torch.cuda.synchronize()
+            e = time.time()
+            
+            if rank == 0:
+                results_csv += f"{b} & {H} & {((e - s)/100.)*1000}"
+
         if rank == 0:
-            print(f"{b} & {H} & {((e - s)/100.)*1000}")
+            with open("results/allreduce_times-{H}.csv") as f:
+                f.write(results_csv)
 
 def init_process(rank, size, fn, backend='nccl'):
     """ Initialize the distributed environment. """

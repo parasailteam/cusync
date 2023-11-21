@@ -10,29 +10,29 @@ mlp: mlp-gpt-3 mlp-llama
 
 attention: attention-gpt-3 attention-llama
 
-attention-gpt-3: plotGPT.py $(TRANSFORMER_RESULTS)/attention_results-gpt-3.csv
-	python3 plotGPT.py $(TRANSFORMER_RESULTS)/attention_results-gpt-3.csv $@.pdf $*
+attention-gpt-3: plotGPT.py $(TRANSFORMER_RESULTS)/attention-gpt-3.csv
+	python3 plotGPT.py $(TRANSFORMER_RESULTS)/attention-gpt-3.csv Figure-6-b.pdf
 
-mlp-gpt-3: plotGPT.py $(TRANSFORMER_RESULTS)/mlp_results-gpt-3.csv
-	python3 plotGPT.py $(TRANSFORMER_RESULTS)/mlp_results-gpt-3.csv $@.pdf
+mlp-gpt-3: plotGPT.py $(TRANSFORMER_RESULTS)/mlp-gpt-3.csv
+	python3 plotGPT.py $(TRANSFORMER_RESULTS)/mlp-gpt-3.csv Figure-6-a.pdf
 
-attention-llama: plotGPT.py $(TRANSFORMER_RESULTS)/attention_results-llama.csv
-	python3 plotGPT.py $(TRANSFORMER_RESULTS)/attention_results-llama.csv $@.pdf $*
+attention-llama: plotGPT.py $(TRANSFORMER_RESULTS)/attention-llama.csv
+	python3 plotGPT.py $(TRANSFORMER_RESULTS)/attention-llama.csv Figure-6-d.pdf
 
-mlp-llama: plotGPT.py $(TRANSFORMER_RESULTS)/mlp_results-llama.csv
-	python3 plotGPT.py $(TRANSFORMER_RESULTS)/mlp_results-llama.csv $@.pdf
+mlp-llama: plotGPT.py $(TRANSFORMER_RESULTS)/mlp-llama.csv
+	python3 plotGPT.py $(TRANSFORMER_RESULTS)/mlp-llama.csv Figure-6-c.pdf
 
-resnet-vgg-common: plotResnet.py $(CONV_RESULTS)/resnet_results.csv
-	python3 plotResnet.py $(CONV_RESULTS)/resnet_results.csv $@.pdf
+resnet-vgg-common: plotResnet.py $(CONV_RESULTS)/resnet.csv
+	python3 plotResnet.py $(CONV_RESULTS)/resnet.csv Figure-7-a.pdf
 
-resnet: plotResnet.py $(CONV_RESULTS)/resnet_results.csv
-	python3 plotResnet.py $(CONV_RESULTS)/resnet_results.csv $@.pdf
+resnet: plotResnet.py $(CONV_RESULTS)/resnet.csv
+	python3 plotResnet.py $(CONV_RESULTS)/resnet.csv Figure-7-b.pdf
 
-vgg: plotResnet.py $(CONV_RESULTS)/vgg_results.csv
-	python3 plotResnet.py $(CONV_RESULTS)/vgg_results.csv $@.pdf
+vgg: plotResnet.py $(CONV_RESULTS)/vgg.csv
+	python3 plotResnet.py $(CONV_RESULTS)/vgg.csv Figure-7-c.pdf
 
-resnetEnd2End: plotResnet.py plotResnetEnd2End.py $(CONV_RESULTS)/resnet_results.csv $(CONV_RESULTS)/vgg_results.csv
-	python3 plotResnetEnd2End.py $(CONV_RESULTS)/resnet_results.csv $@.pdf
+resnetEnd2End: plotResnet.py plotResnetEnd2End.py $(CONV_RESULTS)/resnet.csv $(CONV_RESULTS)/vgg.csv
+	python3 plotResnetEnd2End.py $(CONV_RESULTS)/resnet.csv Figure-8-b.pdf
 
-gptend2End: plotGPT.py plotGPTEnd2End.py $(TRANSFORMER_RESULTS)/mlp_results-gpt-3.csv $(TRANSFORMER_RESULTS)/attention_results-gpt-3.csv $(TRANSFORMER_RESULTS)/mlp_results-llama.csv $(TRANSFORMER_RESULTS)/attention_results-llama.csv
-	python3 plotGPTEnd2End.py $(TRANSFORMER_RESULTS)/mlp_results-gpt-3.csv $(TRANSFORMER_RESULTS)/attention_results-gpt-3.csv $(TRANSFORMER_RESULTS)/mlp_results-llama.csv $(TRANSFORMER_RESULTS)/attention_results-llama.csv $@.pdf
+gptend2End: plotGPT.py plotGPTEnd2End.py $(TRANSFORMER_RESULTS)/mlp-gpt-3.csv $(TRANSFORMER_RESULTS)/attention-gpt-3.csv $(TRANSFORMER_RESULTS)/mlp-llama.csv $(TRANSFORMER_RESULTS)/attention-llama.csv
+	python3 plotGPTEnd2End.py $(TRANSFORMER_RESULTS)/mlp-gpt-3.csv $(TRANSFORMER_RESULTS)/attention-gpt-3.csv $(TRANSFORMER_RESULTS)/mlp-llama.csv $(TRANSFORMER_RESULTS)/attention-llama.csv $(TRANSFORMER_RESULTS)/allreduce-times-12288.csv $(TRANSFORMER_RESULTS)/allreduce-times-8192.csv Figure-8-a.pdf
