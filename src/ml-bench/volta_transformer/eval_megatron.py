@@ -16,6 +16,14 @@ maxspeedup = {}
 import json
 from statistics import stdev
 
+def exec_command(command):
+  print(f"Executing {command} in {os.getcwd()}")
+  (s, o) = subprocess.getstatusoutput(command)
+  if s != 0:
+    print("Error ", o)
+
+  return o
+
 def getAllTimes(s, START, END):
   '''Parse output of binaries to obtain list of times
   '''
@@ -78,10 +86,7 @@ using ShapeMMAWarp = cutlass::gemm::GemmShape<%d, %d, %d>;"""
   fileContents = fileContents[0:tilesCodeStart] + "\n" + tilesCode + "\n" + fileContents[tilesCodeEnd:]
   with open(outFile, "w") as f:
     f.write(fileContents)
-  (s,o) = subprocess.getstatusoutput(f"rm -r {buildDir('streamk-eval')} ; make {buildDir('streamk-eval')}")
-  if s != 0:
-    print(o)
-    sys.exit(0)
+  exec_command(f"rm -r {buildDir('streamk-eval')} ; make {buildDir('streamk-eval')}")
 
 def deleteFiles(syncPolicies, attention_or_mlp):
   command = "rm -f "
@@ -91,11 +96,7 @@ def deleteFiles(syncPolicies, attention_or_mlp):
     else:
       command += buildDir("%s-eval-%s "%(attention_or_mlp, policy))
   
-  (s,o) = subprocess.getstatusoutput(command)
-
-  if s != 0:
-    print(o)
-    sys.exit(0)
+  exec_command(command)
 
 def makeFiles(syncPolicies, attention_or_mlp):
   command = "make "
@@ -107,11 +108,7 @@ def makeFiles(syncPolicies, attention_or_mlp):
 
   flags = "-j"
   command += flags
-  (s,o) = subprocess.getstatusoutput(command)
-
-  if s != 0:
-    print(o)
-    sys.exit(0)
+  exec_command(command)
   
 def genFiles(batchInfo, syncPolicy, attention_or_mlp):
   inMLPFile = "mlp.cu" if attention_or_mlp == "mlp" else "attention.cu"
@@ -919,9 +916,9 @@ for case in cases:
 
   if False:
     if attention_or_mlp == "attention":
-      (s, o) = subprocess.getstatusoutput(f"python3 torch-baselines/torchAttention.py {m} {int(H/8)} {H} {H}")
+      o = exec_command(f"python3 torch-baselines/torchAttention.py {m} {int(H/8)} {H} {H}")
     else:
-      (s, o) = subprocess.getstatusoutput(f"python3 torch-baselines/torchmlp.py {m} {int(FFN)} {H} {H} {model}")
+      o = exec_command(f"python3 torch-baselines/torchmlp.py {m} {int(FFN)} {H} {H} {model}")
     
     if s == -1:
       print("error " + o)
@@ -935,42 +932,20 @@ for case in cases:
     genAndMakeStreamK(tiles[m])
     if model == 'gpt3' or (model == 'llama' and attention_or_mlp == 'attention'):
       streamk_command = buildDir("streamk-eval") + f" --m={m} --alpha=1 --beta=0 --iterations=20 "
-      (s, o) = subprocess.getstatusoutput(streamk_command + f"--n={int(FFN)} --k={H} " + f"--split={tiles[m]['baseline']['split_ks'][0]}")
-      if s != 0:
-        print("StreamK Error")
-        print(o)
-
+      o = exec_command(streamk_command + f"--n={int(FFN)} --k={H} " + f"--split={tiles[m]['baseline']['split_ks'][0]}")
       firstGeMMStreamK = getStreamKTimes(o)
-
-      (s, o) = subprocess.getstatusoutput(streamk_command + f"--n={H} --k={int(FFN)} " + f"--split={tiles[m]['baseline']['split_ks'][1]}")
-      if s != 0:
-        print("StreamK Error")
-        print(o)
-
+      o = exec_command(streamk_command + f"--n={H} --k={int(FFN)} " + f"--split={tiles[m]['baseline']['split_ks'][1]}")
       secondGeMMStreamK = getStreamKTimes(o)
       total = firstGeMMStreamK + secondGeMMStreamK
       print(f'{m} & {H} & {"streamk"} & {"%.2f"%(firstGeMMStreamK*1000)} & {"%.2f"%(secondGeMMStreamK*1000)} & {"%.2f"%(total*1000)}')
     elif model == 'llama' and attention_or_mlp == 'mlp':
       streamk_command = buildDir("streamk-eval") + f" --m={m} --alpha=1 --beta=0 --iterations=20 "
-      (s, o) = subprocess.getstatusoutput(streamk_command + f"--n={int(FFN)} --k={H} " + f"--split={tiles[m]['baseline']['split_ks'][0]}")
-      if s != 0:
-        print("StreamK Error")
-        print(o)
-
+      o = exec_command(streamk_command + f"--n={int(FFN)} --k={H} " + f"--split={tiles[m]['baseline']['split_ks'][0]}")
       firstGeMMStreamK = getStreamKTimes(o)
-
-      (s, o) = subprocess.getstatusoutput(streamk_command + f"--n={int(FFN)} --k={H} " + f"--split={tiles[m]['baseline']['split_ks'][0]}")
-      if s != 0:
-        print("StreamK Error")
-        print(o)
-
+      o = exec_command(streamk_command + f"--n={int(FFN)} --k={H} " + f"--split={tiles[m]['baseline']['split_ks'][0]}")
       secondGeMMStreamK = getStreamKTimes(o)
 
-      (s, o) = subprocess.getstatusoutput(streamk_command + f"--n={H} --k={int(FFN)} " + f"--split={tiles[m]['baseline']['split_ks'][1]}")
-      if s != 0:
-        print("StreamK Error")
-        print(o)
-
+      o = exec_command(streamk_command + f"--n={H} --k={int(FFN)} " + f"--split={tiles[m]['baseline']['split_ks'][1]}")
       thirdGeMMStreamK = getStreamKTimes(o)
       total = firstGeMMStreamK + secondGeMMStreamK + thirdGeMMStreamK
       print(f'{m} & {H} & {"streamk"} & {"%.2f"%(firstGeMMStreamK*1000)} & {"%.2f"%(secondGeMMStreamK*1000)} & {"%.2f"%(thirdGeMMStreamK*1000)} & {"%.2f"%(total*1000)}')
@@ -990,12 +965,10 @@ for case in cases:
   if attention_or_mlp == "attention":
     commandArgs += f" --seqlen {(seq - m) if seq > m else seq}"
   baselineCommand = buildDir(f"{attention_or_mlp}-eval-baseline") + commandArgs + splitKArgs 
-  (s, o) = subprocess.getstatusoutput(baselineCommand)
+  o = exec_command(baselineCommand)
   # print(o)
   if "Invalid" in o:
     pass
-  elif s != 0:
-    print("error " + o)
   else:
     # print(o)
     baselinetimes = getAllTimes(o, 'START-BASELINE', 'END-BASELINE')
@@ -1014,18 +987,16 @@ for case in cases:
     # else:
     command += buildDir("%s-eval-%s "%(attention_or_mlp, syncPolicy))
     command += commandArgs + splitKArgs
-    (s, o) = subprocess.getstatusoutput(command)
+    o = exec_command(command)
   
     otime = -1
     if "Invalid" in o:
       pass
-    elif s != 0:
-      print("error " + o)
     else:
       overlaptimes  = getAllTimes(o, 'START-OVERLAPPED', 'END-OVERLAPPED')
       otime = overlaptimes["Total"]
 
     results_csv += f'{m} & {seq} & {H} & {syncPolicy} & {"%.2f"%avg(bTimeTotal)} & {"%.2f"%stdev(bTimeTotal)} & {"%.2f"%avg(bTimeMatmul1)} & {"%.2f"%avg(bTimeMatmul2)} & {"%.2f"%avg(otime)} & {"%.2f"%stdev(otime)} & {"%.2f"%(100 - avg(otime)/avg(bTimeTotal)*100)}\n'
 
-with open(os.path.join(resultsDir(), f"{attention_or_mlp}-{model.lower()}.csv")) as f:
+with open(os.path.join(resultsDir(""), f"{attention_or_mlp}-{model.lower()}.csv"), "w") as f:
   f.write(results_csv)

@@ -33,15 +33,11 @@ def load_csv(csv_file):
     data = []
     with open(csv_file, 'r') as f:
         csv_reader = csv.reader(f,delimiter='&')
-        header = next(csv_reader)
         for i, row in enumerate(csv_reader):
             row_new = []
             for e in row:
                 row_new.append(e.strip())
             row = row_new
-            if (model == 'gpt-3' and int(row[hInd]) != 12288) or \
-                (model == 'llama' and int(row[hInd]) != 8192):
-                continue
             data += [row]
     
     return data
@@ -90,7 +86,9 @@ while rowIdx < len(data):
             streamK += [float(row[streamkInd])]
         elif row[syncTypeInd] == 'rowsync':
             rowOverlap += [float(row[overlapInd])]
+        elif row[syncTypeInd] == 'baseline':
             baseline += [float(row[baselineInd])]
+            streamK += [float(row[streamkInd])]
         elif row[syncTypeInd] == 'tilesync':
             tileOverlap += [float(row[overlapInd])]
         elif row[syncTypeInd] == 'stridedsync':
@@ -100,6 +98,7 @@ while rowIdx < len(data):
 
 if __name__ == "__main__":
     # secFactor = 1e3 if (secs == "ms") else 1e6
+    print(baseline)
     torchT = np.array(torchT)
     baseline = np.array(baseline)
     ind = np.arange(len(baseline))

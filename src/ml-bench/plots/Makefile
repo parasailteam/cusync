@@ -1,20 +1,20 @@
 TRANSFORMER_RESULTS=../volta_transformer/results/
-CONV_RESULTS=../volta_conv2d/
+CONV_RESULTS=../volta_conv2d/results/
 
 all: attention mlp resnet
 
-gptstreamk: plotGPTStreamK.py mlp_results-gpt-3.csv attention_results-gpt-3.csv
-	python3 plotGPTStreamK.py mlp_results-gpt-3.csv attention_results-gpt-3.csv $@.pdf
+gptstreamk: plotGPTStreamK.py mlp_results-gpt3.csv attention_results-gpt3.csv
+	python3 plotGPTStreamK.py mlp_results-gpt3.csv attention_results-gpt3.csv $@.pdf
 
-mlp: mlp-gpt-3 mlp-llama 
+mlp: mlp-gpt3 mlp-llama 
 
-attention: attention-gpt-3 attention-llama
+attention: attention-gpt3 attention-llama
 
-attention-gpt-3: plotGPT.py $(TRANSFORMER_RESULTS)/attention-gpt-3.csv
-	python3 plotGPT.py $(TRANSFORMER_RESULTS)/attention-gpt-3.csv Figure-6-b.pdf
+attention-gpt3: plotGPT.py $(TRANSFORMER_RESULTS)/attention-gpt3.csv
+	python3 plotGPT.py $(TRANSFORMER_RESULTS)/attention-gpt3.csv Figure-6-b.pdf
 
-mlp-gpt-3: plotGPT.py $(TRANSFORMER_RESULTS)/mlp-gpt-3.csv
-	python3 plotGPT.py $(TRANSFORMER_RESULTS)/mlp-gpt-3.csv Figure-6-a.pdf
+mlp-gpt3: plotGPT.py $(TRANSFORMER_RESULTS)/mlp-gpt3.csv
+	python3 plotGPT.py $(TRANSFORMER_RESULTS)/mlp-gpt3.csv Figure-6-a.pdf
 
 attention-llama: plotGPT.py $(TRANSFORMER_RESULTS)/attention-llama.csv
 	python3 plotGPT.py $(TRANSFORMER_RESULTS)/attention-llama.csv Figure-6-d.pdf
@@ -34,5 +34,5 @@ vgg: plotResnet.py $(CONV_RESULTS)/vgg.csv
 resnetEnd2End: plotResnet.py plotResnetEnd2End.py $(CONV_RESULTS)/resnet.csv $(CONV_RESULTS)/vgg.csv
 	python3 plotResnetEnd2End.py $(CONV_RESULTS)/resnet.csv Figure-8-b.pdf
 
-gptend2End: plotGPT.py plotGPTEnd2End.py $(TRANSFORMER_RESULTS)/mlp-gpt-3.csv $(TRANSFORMER_RESULTS)/attention-gpt-3.csv $(TRANSFORMER_RESULTS)/mlp-llama.csv $(TRANSFORMER_RESULTS)/attention-llama.csv
-	python3 plotGPTEnd2End.py $(TRANSFORMER_RESULTS)/mlp-gpt-3.csv $(TRANSFORMER_RESULTS)/attention-gpt-3.csv $(TRANSFORMER_RESULTS)/mlp-llama.csv $(TRANSFORMER_RESULTS)/attention-llama.csv $(TRANSFORMER_RESULTS)/allreduce-times-12288.csv $(TRANSFORMER_RESULTS)/allreduce-times-8192.csv Figure-8-a.pdf
+gptend2End: plotGPT.py plotGPTEnd2End.py $(TRANSFORMER_RESULTS)/mlp-gpt3.csv $(TRANSFORMER_RESULTS)/attention-gpt3.csv $(TRANSFORMER_RESULTS)/mlp-llama.csv $(TRANSFORMER_RESULTS)/attention-llama.csv
+	python3 plotGPTEnd2End.py $(TRANSFORMER_RESULTS)/mlp-gpt3.csv $(TRANSFORMER_RESULTS)/attention-gpt3.csv $(TRANSFORMER_RESULTS)/mlp-llama.csv $(TRANSFORMER_RESULTS)/attention-llama.csv $(TRANSFORMER_RESULTS)/allreduce-times-12288.csv $(TRANSFORMER_RESULTS)/allreduce-times-8192.csv Figure-8-a.pdf

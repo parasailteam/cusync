@@ -25,10 +25,10 @@ def run(rank, size):
             e = time.time()
             
             if rank == 0:
-                results_csv += f"{b} & {H} & {((e - s)/100.)*1000}"
+                results_csv += f"{b} & {H} & {((e - s)/100.)*1000}\n"
 
         if rank == 0:
-            with open("results/allreduce_times-{H}.csv") as f:
+            with open(f"results/allreduce_times-{H}.csv", "w") as f:
                 f.write(results_csv)
 
 def init_process(rank, size, fn, backend='nccl'):
@@ -39,7 +39,7 @@ def init_process(rank, size, fn, backend='nccl'):
     fn(rank, size)
 
 if __name__ == "__main__":
-    size = 8
+    size = max(8, torch.cuda.device_count())
     processes = []
     mp.set_start_method("spawn")
     for rank in range(size):
