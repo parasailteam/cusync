@@ -7,7 +7,7 @@ csv_file = sys.argv[1]
 pdf_name = sys.argv[2]
 only_one_h = True
 attention_or_mlp = "attention" if ("attention" in csv_file) else "mlp"
-model = "gpt-3" if "gpt-3" in csv_file else "llama"
+model = "gpt3" if "gpt3" in csv_file else "llama"
 only_streamk = False
 if len(sys.argv) > 3 and sys.argv[3] == "only_streamk":
     only_streamk = True
@@ -172,7 +172,7 @@ if __name__ == "__main__":
         # plt.legend((p1[0], p2[0], p4[0]), ('RowSync', 'TileSync+WR', 'StreamK'),
         #             loc='upper left', bbox_to_anchor=(-0.02, 1.03),
         #             ncol=1,columnspacing=1,handlelength=1.7)
-        if model == "gpt-3":
+        if model == "gpt3":
             plt.ylabel('Improvement over StreamSync')
             ax2.get_yaxis().set_label_coords(-0.17,0.4)
         else:
@@ -186,7 +186,7 @@ if __name__ == "__main__":
         if "attention" in csv_file:
             xt = ["512, 0", "1024, 0", "2048, 0", "1, 512", "2, 512", "4, 512", "1, 1024", "2, 1024", "4, 1024", "1, 2048", "2, 2048", "4, 2048"]
         plt.xticks(ind, xt, rotation=90)
-        if attention_or_mlp == "attention" and model == "gpt-3":
+        if attention_or_mlp == "attention" and model == "gpt3":
             plt.legend((p1[0], p2[0], p3[0], p4[0]), 
                     ('RowSync', 'TileSync+WRT', 'StridedTileSync+WRT', 'StreamK'),
                     loc='upper left', bbox_to_anchor=(-0.01, 1.16),
@@ -200,7 +200,7 @@ if __name__ == "__main__":
     # if only_one_h:
     # else:
     #     fig.set_size_inches(8.5, 2.5)
-    if attention_or_mlp == "mlp" and model == "gpt-3":
+    if attention_or_mlp == "mlp" and model == "gpt3":
         fig.set_size_inches(3.3, 2.4)
     else:
         fig.set_size_inches(3.2, 2.4)

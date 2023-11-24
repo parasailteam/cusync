@@ -134,10 +134,9 @@ using OperatorClass       = cutlass::arch::OpClassTensorOp;           // Operato
 
 
 #ifndef EVAL_TILE_SIZES
-
 using ThreadblockShape    = cutlass::gemm::GemmShape<256, 128, 32>;   // Threadblock-level tile size (concept: GemmShape)
-using WarpShape           = cutlass::gemm::GemmShape<128, 64, 32>;     // Warp-level tile size (concept: GemmShape)
-using InstructionShape    = cutlass::gemm::GemmShape<8, 8, 4>;      // Instruction-level tile size (concept: GemmShape)
+using WarpShape           = cutlass::gemm::GemmShape<128, 128, 32>;    // Warp-level tile size (concept: GemmShape)
+using InstructionShape    = cutlass::gemm::GemmShape<8, 8, 4>;        // Instruction-level tile size (concept: GemmShape)
 #else
 //<eval tiles>
 //</eval tiles>

@@ -7,12 +7,14 @@ mlp_gpt3_csv = sys.argv[1]
 attention_gpt3_csv = sys.argv[2]
 mlp_llama_csv = sys.argv[3]
 attention_llama_csv = sys.argv[4]
+allreduce_12288 = sys.argv[5]
+allreduce_8192 = sys.argv[6]
 
 # allreduce_csv = sys.argv[3]
-pdf_name = sys.argv[5]
+pdf_name = sys.argv[7]
 
 def load_csv(csv_file):
-    model = "gpt-3" if "gpt-3" in csv_file else "llama"
+    model = "gpt3" if "gpt3" in csv_file else "llama"
     attention_or_mlp = "attention" if ("attention" in csv_file) else "mlp"
     mInd = 0
     seqInd = 1
@@ -109,8 +111,8 @@ def end2EndResults(attention_csv, mlp_csv, allreduce_csv):
     end2EndSpeedup = (end2endBaselineTimes-end2endOverlap)/end2endBaselineTimes*100
     return end2EndSpeedup
 
-end2EndSpeedupGPT3 = end2EndResults(attention_gpt3_csv,mlp_gpt3_csv,"allreduce-gpt-3.csv")
-end2EndSpeedupLLAMA = end2EndResults(attention_llama_csv,mlp_llama_csv,"allreduce-llama.csv")
+end2EndSpeedupGPT3 = end2EndResults(attention_gpt3_csv,mlp_gpt3_csv,allreduce_12288)
+end2EndSpeedupLLAMA = end2EndResults(attention_llama_csv,mlp_llama_csv,allreduce_8192)
 print(end2EndSpeedupLLAMA)
 print(end2EndSpeedupGPT3)
 

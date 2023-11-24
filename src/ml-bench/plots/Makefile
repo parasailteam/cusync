@@ -1,7 +1,7 @@
 TRANSFORMER_RESULTS=../volta_transformer/results/
 CONV_RESULTS=../volta_conv2d/results/
 
-all: attention mlp resnet
+all: attention mlp resnet vgg resnet-vgg-common resnetEnd2End gptend2End
 
 gptstreamk: plotGPTStreamK.py mlp_results-gpt3.csv attention_results-gpt3.csv
 	python3 plotGPTStreamK.py mlp_results-gpt3.csv attention_results-gpt3.csv $@.pdf
@@ -35,4 +35,7 @@ resnetEnd2End: plotResnet.py plotResnetEnd2End.py $(CONV_RESULTS)/resnet.csv $(C
 	python3 plotResnetEnd2End.py $(CONV_RESULTS)/resnet.csv Figure-8-b.pdf
 
 gptend2End: plotGPT.py plotGPTEnd2End.py $(TRANSFORMER_RESULTS)/mlp-gpt3.csv $(TRANSFORMER_RESULTS)/attention-gpt3.csv $(TRANSFORMER_RESULTS)/mlp-llama.csv $(TRANSFORMER_RESULTS)/attention-llama.csv
-	python3 plotGPTEnd2End.py $(TRANSFORMER_RESULTS)/mlp-gpt3.csv $(TRANSFORMER_RESULTS)/attention-gpt3.csv $(TRANSFORMER_RESULTS)/mlp-llama.csv $(TRANSFORMER_RESULTS)/attention-llama.csv $(TRANSFORMER_RESULTS)/allreduce-times-12288.csv $(TRANSFORMER_RESULTS)/allreduce-times-8192.csv Figure-8-a.pdf
+	python3 plotGPTEnd2End.py $(TRANSFORMER_RESULTS)/mlp-gpt3.csv $(TRANSFORMER_RESULTS)/attention-gpt3.csv $(TRANSFORMER_RESULTS)/mlp-llama.csv $(TRANSFORMER_RESULTS)/attention-llama.csv $(TRANSFORMER_RESULTS)/allreduce_times-12288.csv $(TRANSFORMER_RESULTS)/allreduce_times-8192.csv Figure-8-a.pdf
+
+clean:
+	rm -rf *.pdf

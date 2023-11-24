@@ -895,8 +895,8 @@ deleteFiles(policies+['baseline'], attention_or_mlp)
 if attention_or_mlp == "mlp":
   cases = [1,2,4,8,16,32,64,128,256,512,1024,2048]
 else:
-  #cases = [(0,256), (0,512), (0, 1024), (0, 2048), (1024,1), (1024,4), (2048,1), (2048,4)]
-  cases = [(512,1),(512,2), (512,4), (1024,1), (1024,2), (1024,4), (2048,1), (2048,2), (2048,4)]
+  cases = [(0,512), (0, 1024), (0, 2048), (512,1), (512,2), (512,4), 
+           (1024,1), (1024,2), (1024,4), (2048,1), (2048,2), (2048,4)]
 
 results_csv = ""
 
@@ -933,7 +933,7 @@ for case in cases:
     if model == 'gpt3' or (model == 'llama' and attention_or_mlp == 'attention'):
       streamk_command = buildDir("streamk-eval") + f" --m={m} --alpha=1 --beta=0 --iterations=20 "
       o = exec_command(streamk_command + f"--n={int(FFN)} --k={H} " + f"--split={tiles[m]['baseline']['split_ks'][0]}")
-      firstGeMMStreamK = getStreamKTimes(o)
+      firstGeMMStreamK  = getStreamKTimes(o)
       o = exec_command(streamk_command + f"--n={H} --k={int(FFN)} " + f"--split={tiles[m]['baseline']['split_ks'][1]}")
       secondGeMMStreamK = getStreamKTimes(o)
       total = firstGeMMStreamK + secondGeMMStreamK
@@ -941,7 +941,7 @@ for case in cases:
     elif model == 'llama' and attention_or_mlp == 'mlp':
       streamk_command = buildDir("streamk-eval") + f" --m={m} --alpha=1 --beta=0 --iterations=20 "
       o = exec_command(streamk_command + f"--n={int(FFN)} --k={H} " + f"--split={tiles[m]['baseline']['split_ks'][0]}")
-      firstGeMMStreamK = getStreamKTimes(o)
+      firstGeMMStreamK  = getStreamKTimes(o)
       o = exec_command(streamk_command + f"--n={int(FFN)} --k={H} " + f"--split={tiles[m]['baseline']['split_ks'][0]}")
       secondGeMMStreamK = getStreamKTimes(o)
 
