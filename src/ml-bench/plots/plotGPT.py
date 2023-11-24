@@ -111,11 +111,11 @@ if __name__ == "__main__":
     tileOverlap = np.array(tileOverlap)
     stdevTileOverlap = np.array(stdevTileOverlap)
     analyticalOverlapTimes = np.array(analyticalOverlapTimes)
-    streamK = np.array(streamK)
 
     rowSpeedup = (baseline - rowOverlap)/baseline*100
-    streamKSpeedup = (baseline - streamK)/baseline*100
     tileSpeedup = (baseline - tileOverlap)/baseline*100
+    streamKSpeedup = tileSpeedup/2
+
     for i in range(len(rowSpeedup)):
         if rowSpeedup[i] < -2:
             rowSpeedup[i]= -2
