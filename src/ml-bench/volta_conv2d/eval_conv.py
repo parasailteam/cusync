@@ -6,15 +6,24 @@ import json
 import os
 import sys
 
-resnet_or_vgg = sys.argv[1].strip()
-assert resnet_or_vgg in ['resnet', 'vgg']
+if len(sys.argv) < 2:
+  print ("Arguments are: resnet|vgg")
+  sys.exit(0)
 
+resnet_or_vgg = sys.argv[1].strip()
+if resnet_or_vgg not in ['resnet', 'vgg']:
+  print ("Arguments are: resnet|vgg")
+  sys.exit(0)
+
+#Image Height/Width for a Conv kernel size
 hw = {
     64: {"h": 56, "w": 56},
     128: {"h": 28, "w": 28},
     256: {"h": 14, "w": 14},
     512: {"h": 7, "w": 7}
 }
+
+#Tile sizes for policies, batch sizes, and kernel size
 tiles = {
     1:  {64: {"TileSizes": [64, 64, 32, 32, 32, 32], 
               "baseline": {"split_k":2},
@@ -386,6 +395,7 @@ tiles = {
 }
 
 def exec_command(command):
+  '''Execute a command'''
   print(f"Executing {command} in {os.getcwd()}")
   (s, o) = subprocess.getstatusoutput(command)
   if s != 0:
@@ -394,6 +404,7 @@ def exec_command(command):
   return o
 
 def getAllTimes(s, START, END):
+  '''Parse output to obtain times'''
   alltimes = {}
   assert START in s
   assert END in s
@@ -426,6 +437,7 @@ def slurp(path):
   with open(path, "r") as f:
     return f.read()
 
+#Create build and results directory
 def buildDir(f):
   return 'build/'+f
 
@@ -448,7 +460,9 @@ def makeFiles(syncPolicies):
   command += flags
   o = exec_command(command)
 
+
 def genFiles(batchInfo, syncPolicy):
+  '''Make temp source files for each sync policy for given tile sizes'''
   inFile = resnet_or_vgg + '.cu'
   outFile = buildDir("conv-eval-" + syncPolicy + ".cu")
   fileContents = slurp(inFile)
@@ -493,8 +507,12 @@ using WarpShape = cutlass::gemm::GemmShape<%d, %d, %d>;"""
     f.write(fileContents)
 
 results_csv = ""
+
+#Delete temp files for all policies
 policies=['rowsync'] #,'tilesync'
 deleteFiles(policies+['baseline'])
+
+#Run evaluation
 for c in ([64,128,256,512] if resnet_or_vgg == 'resnet' else [256,512]): #
   for m in [1, 4, 8,12, 16, 20, 24, 28, 32]:
     command_args = f"--n={m} --h={hw[c]['h']} --w={hw[c]['w']} --c={c} --k={c} --r=3 --s=3"
@@ -503,27 +521,16 @@ for c in ([64,128,256,512] if resnet_or_vgg == 'resnet' else [256,512]): #
     for syncPolicy in (policies+['baseline']):
       genFiles(tiles[m][c], syncPolicy)
 
+    #Create and make all policies
     makeFiles(policies+['baseline'])
 
-    if False:
-      o = exec_command(f"python3 torchconv2d.py {m} {c}")
-      torchTime = float(o)
-      print(f"{m} & {c} & torch & {'%.2f'%torchTime}")
-      o = exec_command(f"make {buildDir('conv-eval-streamk')}")
-      # (s, o) = subprocess.getstatusoutput("./conv-eval-streamk " + command_args + " " + split_k)
-      # print(o)
-      # if s != 0:
-      #   print(o)
-      # else:    
-      #   streamkTimes = getAllTimes(o, "START-BASELINE", "END-BASELINE")
-      #   print(f"{m} & {c} & streank & {'%.2f'%avg(streamkTimes)} & {'%.2f'%stdev(streamkTimes)}")
-
-
+    #Evaluate baseline
     o = exec_command(buildDir("./conv-eval-baseline ") + command_args + " " + split_k)
     baselineTimes = getAllTimes(o, "START-BASELINE", "END-BASELINE")
     bTimes = baselineTimes["Total"]
     results_csv += f"{m} & {c} & baseline & {'%.2f'%avg(bTimes)} & {'%.2f'%stdev(bTimes)}\n"
 
+    #Evaluate each policy
     for syncType in policies:
       split_k = f"--split_k_slices={tiles[m][c][syncType]['split_k']}"
       o = exec_command(buildDir(f"./conv-eval-{syncType} ") + command_args + " " + split_k)

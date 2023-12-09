@@ -2,20 +2,20 @@ import subprocess
 import re
 import sys
 import os
-attention_or_mlp = sys.argv[1]
-model = sys.argv[2]
-
-assert attention_or_mlp in ["attention", "mlp"]
-
-baselineTimes = {}
-cublasTimes = {}
-overlappedTimes = {}
-minimumTimes = {}
-speedup = {}
-maxspeedup = {}
 import json
 from statistics import stdev
 
+if len(sys.argv) < 3:
+  print("Arguments are: attention|mlp gpt3|llama")
+  sys.ext(0)
+
+attention_or_mlp = sys.argv[1]
+model = sys.argv[2]
+
+if attention_or_mlp not in ["attention", "mlp"] or model not in ['gpt3', 'llama']:
+  print("Arguments are: attention|mlp gpt3|llama")
+  sys.ext(0)
+  
 def exec_command(command):
   print(f"Executing {command} in {os.getcwd()}")
   (s, o) = subprocess.getstatusoutput(command)
@@ -25,8 +25,7 @@ def exec_command(command):
   return o
 
 def getAllTimes(s, START, END):
-  '''Parse output of binaries to obtain list of times
-  '''
+  '''Parse output of binaries to obtain list of times'''
   alltimes = {}
   assert START in s
   assert END in s
@@ -55,18 +54,23 @@ def avg(l):
   return sum(l)/len(l)
 
 def slurp(path):
+  '''Read a file'''
   with open(path, "r") as f:
     return f.read()
 
 def buildDir(f):
+  '''Build directory'''
   return 'build/'+f
 
+'''Make build dir if not exists'''
 if not os.path.exists(buildDir("")):
   os.mkdir(buildDir(""))
 
 def resultsDir(f):
+  '''Results directory'''
   return 'results/'+f
 
+'''Make results directory if not exists'''
 if not os.path.exists(resultsDir("")):
   os.mkdir(resultsDir(""))
 
@@ -74,7 +78,9 @@ def getStreamKTimes(output):
   runtime = re.findall(r'\s*Avg runtime: ([\d\.]+)', output)
   return float(runtime[0])
 
+#### Write temporary source files for given tile sizes ####
 def genAndMakeStreamK(batchInfo):
+  '''Make streamk temp file for evaluation'''
   inFile = "streamk.cu"
   outFile = buildDir("streamk-eval.cu")
   tilesCode = """using ShapeMMAThreadBlock = cutlass::gemm::GemmShape<%d, %d, %d>;  
@@ -88,29 +94,9 @@ using ShapeMMAWarp = cutlass::gemm::GemmShape<%d, %d, %d>;"""
     f.write(fileContents)
   exec_command(f"rm -r {buildDir('streamk-eval')} ; make {buildDir('streamk-eval')}")
 
-def deleteFiles(syncPolicies, attention_or_mlp):
-  command = "rm -f "
-  for policy in syncPolicies:
-    if attention_or_mlp == 'attention' and policy == 'stridedsync':
-      command += buildDir("%s-%s-eval-%s "%(attention_or_mlp, model, policy))
-    else:
-      command += buildDir("%s-eval-%s "%(attention_or_mlp, policy))
-  
-  exec_command(command)
 
-def makeFiles(syncPolicies, attention_or_mlp):
-  command = "make "
-  for policy in syncPolicies:
-    if attention_or_mlp == 'attention' and policy == 'stridedsync':
-      command += buildDir("%s-%s-eval-%s "%(attention_or_mlp, model, policy))
-    else:
-      command += buildDir("%s-eval-%s "%(attention_or_mlp, policy))
-
-  flags = "-j"
-  command += flags
-  exec_command(command)
-  
 def genFiles(batchInfo, syncPolicy, attention_or_mlp):
+  '''Make temp source files for each sync policy for given tile sizes'''
   inMLPFile = "mlp.cu" if attention_or_mlp == "mlp" else "attention.cu"
   outMLPFile = buildDir(attention_or_mlp + "-eval-" + syncPolicy + ".cu")
   tilesTemplate = """using ShapeThreadBlock%d = cutlass::gemm::GemmShape<%d, %d, %d>;  
@@ -169,6 +155,32 @@ using ShapeWarp = cutlass::gemm::GemmShape<%d, %d, %d>;"""
   with open(outMLPFile, "w") as f:
     f.write(mlpFileContents)
 
+def deleteFiles(syncPolicies, attention_or_mlp):
+  '''Delete all temporary source and binary files'''
+  command = "rm -f "
+  for policy in syncPolicies:
+    if attention_or_mlp == 'attention' and policy == 'stridedsync':
+      command += buildDir("%s-%s-eval-%s "%(attention_or_mlp, model, policy))
+    else:
+      command += buildDir("%s-eval-%s "%(attention_or_mlp, policy))
+  
+  exec_command(command)
+
+def makeFiles(syncPolicies, attention_or_mlp):
+  '''Make all syncpolicies'''
+  command = "make "
+  for policy in syncPolicies:
+    if attention_or_mlp == 'attention' and policy == 'stridedsync':
+      command += buildDir("%s-%s-eval-%s "%(attention_or_mlp, model, policy))
+    else:
+      command += buildDir("%s-eval-%s "%(attention_or_mlp, policy))
+
+  flags = "-j"
+  command += flags
+  exec_command(command)
+  
+
+#### Tile Sizes and Split K Slices for each configuration and sync policy ####
 if model == "gpt3" and attention_or_mlp == "attention":
   tiles = {
     0: {
@@ -873,6 +885,9 @@ elif model == "llama" and attention_or_mlp == "attention":
     }
   }
 
+#############################################################################
+
+# Hidden dimension for models
 if model.lower() == "BLOOM".lower():
   H = 14336
   FFN = 4*H/8
@@ -892,6 +907,7 @@ if 'stridedsync' in policies and attention_or_mlp == 'mlp':
 
 deleteFiles(policies+['baseline'], attention_or_mlp)
 
+# Cases for LLM evaluation in form of (seq, batch)
 if attention_or_mlp == "mlp":
   cases = [1,2,4,8,16,32,64,128,256,512,1024,2048]
 else:
@@ -954,11 +970,13 @@ for case in cases:
   baselineDone = False
   bTimeTotal = 0
 
+  ## Generate files for all policies
   for syncPolicy in (policies+['baseline']):
     genFiles(caseTiles, syncPolicy, attention_or_mlp)
 
   makeFiles(policies+['baseline'], attention_or_mlp)
   
+  # Evaluate baseline, i.e., StreamSync
   split_ks = caseTiles['baseline']['split_ks']
   splitKArgs = " " + " ".join([f"--split-k{i+1} {split_ks[i]}" for i in range(len(split_ks))])
   commandArgs = f" --batch {m} --check false --model {model.lower()}"
@@ -979,13 +997,10 @@ for case in cases:
     baselineDone = True
 
   for syncPolicy in policies:
+    #Evaluate each policy
     splitKs = caseTiles["tilesync"] if syncPolicy == "stridedsync" else caseTiles[syncPolicy]
     splitKArgs = " " + " ".join([f"--split-k{i+1} {split_ks[i]}" for i in range(len(split_ks))])
-    command = ""
-    # if attention_or_mlp == 'attention' and syncPolicy == 'stridedsync':
-    #   command += buildDir("%s-%s-eval-%s "%(attention_or_mlp, model, syncPolicy))
-    # else:
-    command += buildDir("%s-eval-%s "%(attention_or_mlp, syncPolicy))
+    command = buildDir("%s-eval-%s "%(attention_or_mlp, syncPolicy))
     command += commandArgs + splitKArgs
     o = exec_command(command)
   
@@ -998,5 +1013,6 @@ for case in cases:
 
     results_csv += f'{m} & {seq} & {H} & {syncPolicy} & {"%.2f"%avg(bTimeTotal)} & {"%.2f"%stdev(bTimeTotal)} & {"%.2f"%avg(bTimeMatmul1)} & {"%.2f"%avg(bTimeMatmul2)} & {"%.2f"%avg(otime)} & {"%.2f"%stdev(otime)} & {"%.2f"%(100 - avg(otime)/avg(bTimeTotal)*100)}\n'
 
+# Write results
 with open(os.path.join(resultsDir(""), f"{attention_or_mlp}-{model.lower()}.csv"), "w") as f:
   f.write(results_csv)

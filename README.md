@@ -79,9 +79,14 @@ cons.incrementIter();
 ```
 
 ### Examples
-* Two dependent CUDA memcpy kernels: File `src/tests/simple-test.cu` contains an example of synchronizing two dependent CUDA kernels that copies one array to another.
-* Two Dependent CUDA GeMMs:  The directory `src/examples/matrixMul` shows an example of synchronizing two dependent CUDA Matmuls.
+* Two dependent CUDA memcpy kernels: File `tests/simple-test.cu` contains an example of synchronizing two dependent CUDA kernels that copies one array to another.
+* Two Dependent CUDA GeMMs:  The directory `examples/matrixMul` shows an example of synchronizing two dependent CUDA Matmuls.
 
 Tests
 ------
 Run tests using `make run-simple-test`
+
+NVIDIA GPU Architectures
+------------------------
+Current support includes Volta and Ampere architectures of NVIDIA GPUs.
+To add other architecture add `-gencode arch=compute_<ARCH> code=sm_<ARCH>`, where ARCH is other architecture number, in `common.mk`.
