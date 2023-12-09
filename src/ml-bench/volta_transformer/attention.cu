@@ -898,7 +898,6 @@ int run(int argc, char* argv[]) {
               << std::endl;
 
     // Return 0 so tests are considered passing if run on unsupported architectures or CUDA Toolkits.
-    return 0;
   }
   const uint NUM_ARGS = 8;
   std::string argNames[NUM_ARGS] = {"--model", "--batch", "--check", "--seqlen", "--split-k1", "--split-k2", "--split-k3", "--split-k4"};

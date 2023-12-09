@@ -858,7 +858,6 @@ int run(int argc, char* argv[]) {
     std::cerr << "Volta Tensor Ops must be run on a machine"
               << "with compute capability of 70, 72, or 75."
               << std::endl;
-    return 0;
   }
   
   const uint NUM_ARGS = 5;

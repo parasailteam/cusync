@@ -1,6 +1,6 @@
 include ../common.mk
 
-ARCH_FLAGS=-gencode=arch=compute_70,code=[sm_70,compute_70]
+ARCH_FLAGS=-gencode=arch=compute_70,code=[sm_70,compute_70] -gencode=arch=compute_80,code=[sm_80,compute_80]
 XCOMPILER=-Xcompiler=-fPIE -Xcompiler=-Wconversion -Xcompiler=-fno-strict-aliasing
 BUILD=build
 

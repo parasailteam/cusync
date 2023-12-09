@@ -834,10 +834,10 @@ int main(int argc, char const **args) {
   // Turing Tensor Core operations exposed with mma.sync are first available in CUDA 10.2.
   //
   // CUTLASS must be compiled with CUDA 10.2 Toolkit to run these examples.
-  if (!(__CUDACC_VER_MAJOR__ > 10 || (__CUDACC_VER_MAJOR__ == 10 && __CUDACC_VER_MINOR__ >= 2))) {
-    std::cerr << "Turing Tensor Core operations must be compiled with CUDA 10.2 Toolkit or later." << std::endl;
-    return 0;
-  }
+ // if (!(__CUDACC_VER_MAJOR__ > 10 || (__CUDACC_VER_MAJOR__ == 10 && __CUDACC_VER_MINOR__ >= 2))) {
+ //   std::cerr << "Turing Tensor Core operations must be compiled with CUDA 10.2 Toolkit or later." << std::endl;
+ //   return 0;
+ // }
 
   cudaDeviceProp props;
   CUDA_CHECK(cudaGetDeviceProperties(&props, 0));
