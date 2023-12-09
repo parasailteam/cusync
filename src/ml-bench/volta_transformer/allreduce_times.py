@@ -39,7 +39,7 @@ def init_process(rank, size, fn, backend='nccl'):
     fn(rank, size)
 
 if __name__ == "__main__":
-    size = max(8, torch.cuda.device_count())
+    size = min(8, torch.cuda.device_count())
     processes = []
     mp.set_start_method("spawn")
     for rank in range(size):
