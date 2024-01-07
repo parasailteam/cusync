@@ -203,11 +203,41 @@ struct CuSyncGemm {
     return Status::kSuccess;
   }
 
+  static __device__ __inline__ uint32_t getsmid(){    
+  uint32_t smid;    
+  asm volatile("mov.u32 %0, %%smid;" : "=r"(smid));    
+  return smid;}
+
   //TODO: Had to make Params non-const, does that have any perf issue?
   CUTLASS_DEVICE
   void operator()(Params &params, SharedStorage &shared_storage) {
     CuStageImpl& stage = params.custage;
-    dim3 new_block_idx = stage.tile(&shared_storage.tile_idx);
+    uint32_t smid = getsmid();
+    dim3 new_block_idx;
+    if (false && stage.isProducer()) {
+      if (smid >= 48) {
+        return;
+      } else {
+        new_block_idx.x = smid%24;
+        new_block_idx.y = 0;
+        new_block_idx.z = smid/24;
+      }
+    } else {
+      new_block_idx = stage.tile(&shared_storage.tile_idx);
+    }
+    // else 
+    // {
+    //   if (smid < 48 || smid  48+48) {
+    //     return;
+    //   } else {
+    //     new_block_idx.x = smid-60;
+    //     new_block_idx.y = 0;
+    //     new_block_idx.z = 0;
+    //   }
+    // }
+
+
+
     
     uint block_idx_y = new_block_idx.y;
     uint block_idx_x = new_block_idx.x;

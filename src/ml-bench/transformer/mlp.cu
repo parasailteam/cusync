@@ -43,8 +43,8 @@
 #define REORDER_TILE_LOADS
 #endif
 
-// #define AVOID_CUSTOM_ORDER
-// #define AVOID_WAIT_KERNEL
+#define AVOID_CUSTOM_ORDER
+#define AVOID_WAIT_KERNEL
 
 // #if defined(TILESYNC) || defined(TILEBATCH)
 // #endif 
@@ -70,16 +70,17 @@ const uint Opts =
 
 #include "common.h"
 
+//32x256x32, 32x64x32, 4 with split k 1, 1. no stream is 210 vs 255 with stream sync
 #ifndef EVAL_TILE_SIZES
 //Tile sizes of all GeMMs
-using ShapeThreadBlock1 = cutlass::gemm::GemmShape<256, 128, 32>;
-using ShapeWarp1 = cutlass::gemm::GemmShape<64, 64, 32>;
+using ShapeThreadBlock1 = cutlass::gemm::GemmShape<32, 256, 32>;
+using ShapeWarp1 = cutlass::gemm::GemmShape<32, 64, 32>;
 
-using ShapeThreadBlock2 = cutlass::gemm::GemmShape<256, 128, 32>;
-using ShapeWarp2 = cutlass::gemm::GemmShape<64, 64, 32>;
+using ShapeThreadBlock2 = cutlass::gemm::GemmShape<32, 256, 32>;
+using ShapeWarp2 = cutlass::gemm::GemmShape<32, 64, 32>;
 
-const int NumStages1 = 5;
-const int NumStages2 = 5;
+const int NumStages1 = 4;
+const int NumStages2 = 4;
 #else
 //<eval tiles>
 using ShapeMMAThreadBlock = cutlass::gemm::GemmShape<32, 256, 32>;  
@@ -269,8 +270,9 @@ struct MLPParameters {
     model = model_;
 
     if (model == "gpt3") {
-      gemm_size1 = cutlass::gemm::GemmCoord(batch, 4*12288/8, 12288);
-      gemm_size2 = cutlass::gemm::GemmCoord(batch, 12288, 4*12288/8);
+      uint H = 12288;
+      gemm_size1 = cutlass::gemm::GemmCoord(batch, H/2, H);
+      gemm_size2 = cutlass::gemm::GemmCoord(batch, H, H/2);
     } else if (model=="llama") {
       int H = 8192;
       int d = ((H/3 + 127)/128)*128;
@@ -717,19 +719,21 @@ cudaError_t runCuSyncGPT3(int split_k1, int split_k2,
   CUDA_CHECK(cudaEventCreate(&end));
 
   for (int r = 0; r < iters; r++) {
-    CUDA_CHECK(cudaEventRecord(start, producer_stream));
+    double startTime = getCurrentTime();
+    // CUDA_CHECK(cudaEventRecord(start, producer_stream));
     status = gemm_op1.run(true, NULL, producer_stream);
     CUTLASS_CHECK(status);
     // CUDA_CHECK(cudaDeviceSynchronize());
     // CUDA_CHECK(cudaDeviceSynchronize());
-    prod.invokeWaitKernel(consumer_stream);  
-    // CUDA_CHECK(cudaDeviceSynchronize());
-    status = gemm_op2.run(true, NULL, consumer_stream);
-    CUDA_CHECK(cudaEventRecord(end, consumer_stream));
-    CUDA_CHECK(cudaEventSynchronize(end));
+    // prod.invokeWaitKernel(consumer_stream);  
+    status = gemm_op2.run(true, NULL, producer_stream);
+    // CUDA_CHECK(cudaEventRecord(end, consumer_stream));
+    CUDA_CHECK(cudaDeviceSynchronize());
+    double endTime = getCurrentTime();
+    // CUDA_CHECK(cudaEventSynchronize(end));
     CUTLASS_CHECK(status);
-    float time_ms = 0;
-    CUDA_CHECK(cudaEventElapsedTime(&time_ms, start, end));
+    float time_ms = (endTime - startTime)/1000.0f;
+    // CUDA_CHECK(cudaEventElapsedTime(&time_ms, start, end));
     
     if (iters > 10)
       printf("{\"Total\": %lf}\n",time_ms*1000.0f);
@@ -832,8 +836,8 @@ cudaError_t runCuSyncLLaMA(int split_k1, int split_k2,
   CUDA_CHECK(cudaEventCreate(&start));
   CUDA_CHECK(cudaEventCreate(&end));
   for (int r = 0; r < iters; r++) {
-    // double start = timeInMicroSeconds();
-    CUDA_CHECK(cudaEventRecord(start, streams[0]));
+    double startTime = timeInMicroSeconds();
+    // CUDA_CHECK(cudaEventRecord(start, streams[0]));
     status = gemm_opXVW1.run(true, NULL, streams[0]);
     CUTLASS_CHECK(status);
 
@@ -848,11 +852,13 @@ cudaError_t runCuSyncLLaMA(int split_k1, int split_k2,
   
     status = gemm_opXW12.run(true, NULL, streams[1]);
     CUTLASS_CHECK(status);
-    CUDA_CHECK(cudaEventRecord(end, streams[1]));
-    CUDA_CHECK(cudaEventSynchronize(end));
-    float time_ms = 0;
-    CUDA_CHECK(cudaEventElapsedTime(&time_ms, start, end));
-    // CUDA_CHECK(cudaDeviceSynchronize());
+    // CUDA_CHECK(cudaEventRecord(end, streams[1]));
+    CUDA_CHECK(cudaDeviceSynchronize());
+    double endTime = timeInMicroSeconds();
+    // CUDA_CHECK(cudaEventSynchronize(end));
+    float time_ms = (endTime - startTime)/1000.0f;
+    // CUDA_CHECK(cudaEventElapsedTime(&time_ms, start, end));
+    
 
     // double end = timeInMicroSeconds();
     if (iters > 10) {

@@ -7,10 +7,10 @@ model = sys.argv[2]
 assert model in ['gpt3', 'llama']
 
 if model == 'gpt3':
-    H = 12288
+    H = 6144
     X = torch.ones((M, H), dtype=torch.half).cuda()
-    W1 = torch.ones((H, H//2), dtype=torch.half).cuda()
-    W2 = torch.ones((H//2, H), dtype=torch.half).cuda()
+    W1 = torch.ones((H, H), dtype=torch.half).cuda()
+    W2 = torch.ones((H, H), dtype=torch.half).cuda()
 else:
     H = 8192
     H2 = ((H//3 + 127)//128)*128
@@ -18,6 +18,9 @@ else:
     W1 = torch.ones((H, 2*H2), dtype=torch.half).cuda()
     W2 = torch.ones((H2, H), dtype=torch.half).cuda()
     XW1_ = torch.ones((M, H2), dtype=torch.half).cuda()
+
+s1 = torch.cuda.Stream()
+s2 = torch.cuda.Stream()
 
 epochs = 20
 for i in range(epochs):
@@ -28,8 +31,10 @@ start = time.time_ns()
 
 if model == 'gpt3':
     for i in range(epochs):
-        XW1 = X@W1
-        out = XW1@W2
+        # with torch.cuda.stream(s1):
+            XW1 = X@W1
+        # with torch.cuda.stream(s2):
+            # out = XW1@W2
     torch.cuda.synchronize()
 elif model == 'llama':    
     for i in range(epochs):

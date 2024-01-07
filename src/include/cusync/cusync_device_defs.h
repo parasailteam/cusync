@@ -30,7 +30,8 @@ namespace cusync {
   CUSTAGE_METHOD_DEF(CuSyncError) wait(dim3& tile, uint32_t waitingThread, bool callSync) {
     if (!isConsumer()) return CuSyncErrorNotConsumer;
     if (!inputPolicy_.isSync(tile, prodGrid_)) return CuSyncSuccess;
-    
+    return CuSyncSuccess;
+
     if (threadIdx.x == waitingThread && threadIdx.y == 0 && threadIdx.z == 0) {
       uint32_t w = inputPolicy_.waitValue(tile, prodGrid_);
       uint32_t idx = inputPolicy_.tileIndex(tile, prodGrid_);
@@ -50,6 +51,8 @@ namespace cusync {
    * Post the status of completion of tile.
   */
   CUSTAGE_METHOD_DEF(CuSyncError) post(const dim3& tile, uint32_t postThread) {
+    
+    return CuSyncSuccess;
     if (!isProducer()) return CuSyncErrorNotProducer;
     __syncthreads();
     if (threadIdx.x == postThread && threadIdx.y == 0 && threadIdx.z == 0) {

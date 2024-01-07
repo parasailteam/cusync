@@ -12,20 +12,29 @@ b = torch.ones((K, N), dtype=torch.half).cuda()
 # d = torch.ones((N, L), dtype=torch.half).cuda()
 #e = torch.ones([M, L], dtype=torch.half).cuda()
 
-c = a@b
-print(c.dtype)
-for i in range(10):
-    c = a@b
-#    e = c@d
-torch.cuda.synchronize()
+def matmul(a, b):
+    return a@b
 
-epochs = 20
-start = time.time_ns()
+def run(func):
+    for i in range(10):
+        c = func(a,b)
 
-for i in range(epochs):
-    c = a@b
- #   e = c@d
-torch.cuda.synchronize()
-end = time.time_ns()
+    torch.cuda.synchronize()
 
-print((end-start)/epochs/1e3)
+    epochs = 20
+    start = time.time_ns()
+
+    for i in range(epochs):
+        c = func(a,b)
+
+    torch.cuda.synchronize()
+    end = time.time_ns()
+
+    print((end-start)/epochs/1e3)
+
+# run(matmul)
+
+a = torch.ones((2, M, K), dtype=torch.half).cuda()
+b = torch.ones((2, K, N), dtype=torch.half).cuda()
+
+# run(lambda x,y: torch.bmm(x,y))
